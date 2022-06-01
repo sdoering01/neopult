@@ -60,11 +60,7 @@ fn list_actions(ctx: &LuaContext) -> Vec<String> {
             for action in module.actions.read().unwrap().iter() {
                 let action_identifier = format!(
                     "{}{}{}{}{}",
-                    plugin_instance.name,
-                    SEPARATOR,
-                    module.name,
-                    SEPARATOR,
-                    action.name
+                    plugin_instance.name, SEPARATOR, module.name, SEPARATOR, action.name
                 );
                 action_identifiers.push(action_identifier);
             }
@@ -74,9 +70,7 @@ fn list_actions(ctx: &LuaContext) -> Vec<String> {
 }
 
 fn call_action(lua: &Lua, ctx: &LuaContext, action_identifier: &str) -> anyhow::Result<()> {
-    let tokens = action_identifier
-        .split(SEPARATOR)
-        .collect::<Vec<_>>();
+    let tokens = action_identifier.split(SEPARATOR).collect::<Vec<_>>();
     if tokens.len() != 3 {
         anyhow::bail!("malformed action identifier: \"{}\"", action_identifier);
     }
@@ -137,7 +131,9 @@ fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start(mut command_receiver: mpsc::Receiver<(String, oneshot::Sender<String>)>) -> anyhow::Result<()> {
+pub fn start(
+    mut command_receiver: mpsc::Receiver<(String, oneshot::Sender<String>)>,
+) -> anyhow::Result<()> {
     let lua = Lua::new();
 
     let ctx = Arc::new(LuaContext {

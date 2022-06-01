@@ -11,3 +11,5 @@ mlua = { version = "0.7", features = ["luajit"] }
 axum = { version = "0.5", features = ["ws"] }
 xcb = { version = "1.1", features = ["randr"] }
 anyhow = "1.0"
+log = "0.4"
+env_logger = "0.9"

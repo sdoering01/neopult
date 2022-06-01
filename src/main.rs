@@ -1,11 +1,14 @@
 use anyhow::Result;
+use env_logger::Env;
 use std::io::{self, BufRead};
-use tokio::sync::{oneshot, mpsc};
 use std::thread;
+use tokio::sync::{mpsc, oneshot};
 
 mod plugin_system;
 
 fn main() -> Result<()> {
+    env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
+
     let (sender, receiver) = mpsc::channel(16);
     let plugin_system_handle = thread::spawn(move || plugin_system::start(receiver));
 

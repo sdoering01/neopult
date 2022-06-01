@@ -1,26 +1,31 @@
 use crate::plugin_system::{
-    create_context_function, log, Action, LuaContext, Module, PluginInstance, SEPARATOR,
+    create_context_function, Action, LuaContext, Module, PluginInstance, SEPARATOR,
 };
+use ::log::{debug, error, info, warn};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
 use std::sync::Arc;
 
 trait LoggableHandle {
     fn prefix_msg(&self, msg: String) -> String;
 
-    fn debug(&self, lua: &Lua, msg: String) -> mlua::Result<()> {
-        log::debug(lua, self.prefix_msg(msg))
+    fn debug(&self, msg: String) -> mlua::Result<()> {
+        debug!("{}", self.prefix_msg(msg));
+        Ok(())
     }
 
-    fn info(&self, lua: &Lua, msg: String) -> mlua::Result<()> {
-        log::info(lua, self.prefix_msg(msg))
+    fn info(&self, msg: String) -> mlua::Result<()> {
+        info!("{}", self.prefix_msg(msg));
+        Ok(())
     }
 
-    fn warning(&self, lua: &Lua, msg: String) -> mlua::Result<()> {
-        log::warning(lua, self.prefix_msg(msg))
+    fn warn(&self, msg: String) -> mlua::Result<()> {
+        warn!("{}", self.prefix_msg(msg));
+        Ok(())
     }
 
-    fn error(&self, lua: &Lua, msg: String) -> mlua::Result<()> {
-        log::error(lua, self.prefix_msg(msg))
+    fn error(&self, msg: String) -> mlua::Result<()> {
+        error!("{}", self.prefix_msg(msg));
+        Ok(())
     }
 }
 
@@ -38,10 +43,10 @@ impl LoggableHandle for PluginInstanceHandle {
 
 impl UserData for PluginInstanceHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("debug", |lua, this, msg: String| this.debug(lua, msg));
-        methods.add_method("info", |lua, this, msg: String| this.info(lua, msg));
-        methods.add_method("warning", |lua, this, msg: String| this.warning(lua, msg));
-        methods.add_method("error", |lua, this, msg: String| this.error(lua, msg));
+        methods.add_method("debug", |_lua, this, msg: String| this.debug(msg));
+        methods.add_method("info", |_lua, this, msg: String| this.info(msg));
+        methods.add_method("warn", |_lua, this, msg: String| this.warn(msg));
+        methods.add_method("error", |_lua, this, msg: String| this.error(msg));
 
         methods.add_method(
             "register_module",
@@ -49,13 +54,13 @@ impl UserData for PluginInstanceHandle {
                 let mut modules = this.plugin_instance.modules.write().unwrap();
 
                 if modules.iter().any(|m| m.name == name) {
-                    this.error(
-                        lua,
-                        format!("tried registering module with duplicate name {}", name),
-                    )?;
+                    this.error(format!(
+                        "tried registering module with duplicate name {}",
+                        name
+                    ))?;
                     Ok(Value::Nil)
                 } else {
-                    this.debug(lua, format!("registering module {}", name))?;
+                    this.debug(format!("registering module {}", name))?;
                     let module = Arc::new(Module::new(name, this.plugin_instance.name.clone()));
                     let module_handle = ModuleHandle {
                         module: module.clone(),
@@ -86,22 +91,22 @@ impl LoggableHandle for ModuleHandle {
 
 impl UserData for ModuleHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("debug", |lua, this, msg: String| this.debug(lua, msg));
-        methods.add_method("info", |lua, this, msg: String| this.info(lua, msg));
-        methods.add_method("warning", |lua, this, msg: String| this.warning(lua, msg));
-        methods.add_method("error", |lua, this, msg: String| this.error(lua, msg));
+        methods.add_method("debug", |_lua, this, msg: String| this.debug(msg));
+        methods.add_method("info", |_lua, this, msg: String| this.info(msg));
+        methods.add_method("warn", |_lua, this, msg: String| this.warn(msg));
+        methods.add_method("error", |_lua, this, msg: String| this.error(msg));
 
         methods.add_method(
             "register_action",
             |lua, this, (name, callback): (String, Function)| {
                 let mut actions = this.module.actions.write().unwrap();
                 if actions.iter().any(|a| a.name == name) {
-                    this.error(
-                        lua,
-                        format!("tried registering action with duplicate name {}", name),
-                    )?;
+                    this.error(format!(
+                        "tried registering action with duplicate name {}",
+                        name
+                    ))?;
                 } else {
-                    this.debug(lua, format!("registering action {}", name))?;
+                    this.debug(format!("registering action {}", name))?;
                     let key = lua.create_registry_value(callback)?;
                     let action = Action { name, key };
                     actions.push(action);
@@ -119,16 +124,13 @@ fn register_plugin_instance<'lua>(
 ) -> mlua::Result<Value<'lua>> {
     let mut plugin_instances = ctx.plugin_instances.write().unwrap();
     if plugin_instances.iter().any(|p| p.name == name) {
-        log::error(
-            lua,
-            format!(
-                "tried registering plugin instance with duplicate name {}",
-                name
-            ),
-        )?;
+        error!(
+            "tried registering plugin instance with duplicate name {}",
+            name
+        );
         Ok(Value::Nil)
     } else {
-        log::debug(lua, format!("registering plugin instance {}", name))?;
+        debug!("registering plugin instance {}", name);
         let plugin_instance = Arc::new(PluginInstance::new(name));
         let plugin_instance_handle = PluginInstanceHandle {
             plugin_instance: plugin_instance.clone(),

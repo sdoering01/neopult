@@ -1,22 +1,23 @@
+use log::{debug, error, info, warn};
 use mlua::{Lua, Table};
 
-pub(super) fn debug(_lua: &Lua, msg: String) -> mlua::Result<()> {
-    println!("LUA DBG -- {}", msg);
+fn debug(_lua: &Lua, msg: String) -> mlua::Result<()> {
+    debug!("{}", msg);
     Ok(())
 }
 
-pub(super) fn info(_lua: &Lua, msg: String) -> mlua::Result<()> {
-    println!("LUA INF -- {}", msg);
+fn info(_lua: &Lua, msg: String) -> mlua::Result<()> {
+    info!("{}", msg);
     Ok(())
 }
 
-pub(super) fn warning(_lua: &Lua, msg: String) -> mlua::Result<()> {
-    println!("LUA WRN -- {}", msg);
+fn warn(_lua: &Lua, msg: String) -> mlua::Result<()> {
+    warn!("{}", msg);
     Ok(())
 }
 
-pub(super) fn error(_lua: &Lua, msg: String) -> mlua::Result<()> {
-    println!("LUA ERR -- {}", msg);
+fn error(_lua: &Lua, msg: String) -> mlua::Result<()> {
+    error!("{}", msg);
     Ok(())
 }
 
@@ -25,7 +26,7 @@ pub(super) fn inject_log_functions(lua: &Lua, neopult: &Table) -> mlua::Result<(
 
     log.set("debug", lua.create_function(debug)?)?;
     log.set("info", lua.create_function(info)?)?;
-    log.set("warning", lua.create_function(warning)?)?;
+    log.set("warn", lua.create_function(warn)?)?;
     log.set("error", lua.create_function(error)?)?;
 
     neopult.set("log", log)?;
