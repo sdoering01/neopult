@@ -14,7 +14,7 @@ M.setup = function(args)
     local plugin_handle = api.register_plugin_instance("cvh-camera")
     if plugin_handle then
         for camera = 1, cameras do
-            module_handle = plugin_handle:register_module("camera-" .. camera)
+            local module_handle = plugin_handle:register_module("camera-" .. camera)
             if module_handle then
                 camera_modules[#camera_modules + 1] = module_handle
                 module_handle:register_action("show", function() module_handle:info("show action") end)
