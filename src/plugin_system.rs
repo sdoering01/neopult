@@ -230,8 +230,8 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                     let actions = list_actions(&ctx);
                     let reply = actions.join("\n");
                     let _ = reply_sender.send(reply);
-                } else if command.starts_with("call ") {
-                    match call_action(&lua, &ctx, &command[5..]) {
+                } else if let Some(identifier) = command.strip_prefix("call ") {
+                    match call_action(lua, &ctx, identifier) {
                         Ok(_) => {
                             let _ = reply_sender.send("action called successfully".to_string());
                         }
@@ -248,8 +248,8 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                 process_name,
                 plugin_instance,
                 callback_key,
-            } => match lua.registry_value::<Function>(&callback_key) {
-                Ok(callback) => {
+            } => {
+                if let Ok(callback) = lua.registry_value::<Function>(&callback_key) {
                     if let Err(e) = callback.call::<_, Value>(line) {
                         plugin_instance.error(format!(
                             "error when handling callback for process {}: {}",
@@ -257,8 +257,7 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                         ));
                     }
                 }
-                Err(_) => {}
-            },
+            }
         }
     }
 }

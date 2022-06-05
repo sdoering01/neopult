@@ -64,9 +64,10 @@ impl PluginInstanceHandle {
                                 callback_key: callback_key.clone(),
                             };
                             if event_sender.blocking_send(event).is_err() {
-                                plugin_instance.warn(format!(
+                                plugin_instance.warn(
                                     "event receiver was dropped, couldn't send process output"
-                                ));
+                                        .to_string(),
+                                );
                                 break;
                             };
                         }
