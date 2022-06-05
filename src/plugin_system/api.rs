@@ -1,33 +1,12 @@
 use crate::plugin_system::{
-    create_context_function, Action, LuaContext, Module, PluginInstance, SEPARATOR,
+    create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, PluginInstance,
 };
-use ::log::{debug, error, info, warn};
+use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
+use std::io::{prelude::*, BufReader};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-
-trait LoggableHandle {
-    fn prefix_msg(&self, msg: String) -> String;
-
-    fn debug(&self, msg: String) -> mlua::Result<()> {
-        debug!("{}", self.prefix_msg(msg));
-        Ok(())
-    }
-
-    fn info(&self, msg: String) -> mlua::Result<()> {
-        info!("{}", self.prefix_msg(msg));
-        Ok(())
-    }
-
-    fn warn(&self, msg: String) -> mlua::Result<()> {
-        warn!("{}", self.prefix_msg(msg));
-        Ok(())
-    }
-
-    fn error(&self, msg: String) -> mlua::Result<()> {
-        error!("{}", self.prefix_msg(msg));
-        Ok(())
-    }
-}
+use std::thread;
 
 #[derive(Debug)]
 struct PluginInstanceHandle {
@@ -35,43 +14,132 @@ struct PluginInstanceHandle {
     ctx: Arc<LuaContext>,
 }
 
-impl LoggableHandle for PluginInstanceHandle {
-    fn prefix_msg(&self, msg: String) -> String {
-        format!("[{}] {}", self.plugin_instance.name, msg)
+impl PluginInstanceHandle {
+    fn spawn_process<'lua>(
+        &self,
+        lua: &'lua Lua,
+        (cmd, opts): (String, Value),
+    ) -> mlua::Result<Value<'lua>> {
+        let child_result = Command::new(cmd.clone())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn();
+
+        let mut child = match child_result {
+            Err(e) => {
+                self.plugin_instance
+                    .error(format!("couldn't spawn process {}: {}", cmd, e));
+                return Ok(Value::Nil);
+            }
+            Ok(c) => {
+                self.plugin_instance
+                    .debug(format!("spawned process {}", cmd));
+                c
+            }
+        };
+
+        let mut on_output_key = None;
+
+        if let Value::Table(opts_table) = opts {
+            if let Ok(on_output) = opts_table.get::<_, Function>("on_output") {
+                on_output_key = Some(lua.create_registry_value(on_output)?);
+            }
+        }
+
+        if let Some(key) = on_output_key {
+            let stdout = child.stdout.take().unwrap();
+            let event_sender = self.ctx.event_sender.clone();
+            let process_name = cmd;
+            let plugin_instance = self.plugin_instance.clone();
+            let callback_key = Arc::new(key);
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line_result in reader.lines() {
+                    match line_result {
+                        Ok(line) => {
+                            let event = Event::ProcessOutput {
+                                line,
+                                process_name: process_name.clone(),
+                                plugin_instance: plugin_instance.clone(),
+                                callback_key: callback_key.clone(),
+                            };
+                            if event_sender.blocking_send(event).is_err() {
+                                plugin_instance.warn(format!(
+                                    "event receiver was dropped, couldn't send process output"
+                                ));
+                                break;
+                            };
+                        }
+                        Err(e) => {
+                            plugin_instance.error(format!(
+                                "error while reading stdout of process {}: {}",
+                                process_name, e
+                            ));
+                        }
+                    }
+                }
+            });
+        }
+
+        let process_handle = ProcessHandle { child };
+
+        lua.pack(process_handle)
+    }
+
+    fn register_module<'lua>(
+        &self,
+        lua: &'lua Lua,
+        (name, _args): (String, Value),
+    ) -> mlua::Result<Value<'lua>> {
+        let mut modules = self.plugin_instance.modules.write().unwrap();
+
+        if modules.iter().any(|m| m.name == name) {
+            self.plugin_instance.error(format!(
+                "tried registering module with duplicate name {}",
+                name
+            ));
+            Ok(Value::Nil)
+        } else {
+            self.plugin_instance
+                .debug(format!("registering module {}", name));
+            let module = Arc::new(Module::new(name, self.plugin_instance.name.clone()));
+            let module_handle = ModuleHandle {
+                module: module.clone(),
+                ctx: self.ctx.clone(),
+            };
+            modules.push(module);
+            let val = lua.pack(module_handle)?;
+            Ok(val)
+        }
     }
 }
 
 impl UserData for PluginInstanceHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("debug", |_lua, this, msg: String| this.debug(msg));
-        methods.add_method("info", |_lua, this, msg: String| this.info(msg));
-        methods.add_method("warn", |_lua, this, msg: String| this.warn(msg));
-        methods.add_method("error", |_lua, this, msg: String| this.error(msg));
+        methods.add_method("debug", |_lua, this, msg: String| {
+            this.plugin_instance.debug(msg);
+            Ok(())
+        });
+        methods.add_method("info", |_lua, this, msg: String| {
+            this.plugin_instance.info(msg);
+            Ok(())
+        });
+        methods.add_method("warn", |_lua, this, msg: String| {
+            this.plugin_instance.warn(msg);
+            Ok(())
+        });
+        methods.add_method("error", |_lua, this, msg: String| {
+            this.plugin_instance.error(msg);
+            Ok(())
+        });
 
-        methods.add_method(
-            "register_module",
-            |lua, this, (name, _args): (String, Value)| {
-                let mut modules = this.plugin_instance.modules.write().unwrap();
+        methods.add_method("register_module", |lua, this, (name, args)| {
+            this.register_module(lua, (name, args))
+        });
 
-                if modules.iter().any(|m| m.name == name) {
-                    this.error(format!(
-                        "tried registering module with duplicate name {}",
-                        name
-                    ))?;
-                    Ok(Value::Nil)
-                } else {
-                    this.debug(format!("registering module {}", name))?;
-                    let module = Arc::new(Module::new(name, this.plugin_instance.name.clone()));
-                    let module_handle = ModuleHandle {
-                        module: module.clone(),
-                        ctx: this.ctx.clone(),
-                    };
-                    modules.push(module);
-                    let val = lua.pack(module_handle)?;
-                    Ok(val)
-                }
-            },
-        );
+        methods.add_method("spawn_process", |lua, this, (cmd, opts)| {
+            this.spawn_process(lua, (cmd, opts))
+        });
     }
 }
 
@@ -80,40 +148,72 @@ struct ModuleHandle {
     ctx: Arc<LuaContext>,
 }
 
-impl LoggableHandle for ModuleHandle {
-    fn prefix_msg(&self, msg: String) -> String {
-        format!(
-            "[{}{}{}] {}",
-            self.module.plugin_instance_name, SEPARATOR, self.module.name, msg
-        )
+impl ModuleHandle {
+    fn register_action(&self, lua: &Lua, (name, callback): (String, Function)) -> mlua::Result<()> {
+        let mut actions = self.module.actions.write().unwrap();
+        if actions.iter().any(|a| a.name == name) {
+            self.module.error(format!(
+                "tried registering action with duplicate name {}",
+                name
+            ));
+        } else {
+            self.module.debug(format!("registering action {}", name));
+            let key = lua.create_registry_value(callback)?;
+            let action = Action { name, key };
+            actions.push(action);
+        }
+        Ok(())
     }
 }
 
 impl UserData for ModuleHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("debug", |_lua, this, msg: String| this.debug(msg));
-        methods.add_method("info", |_lua, this, msg: String| this.info(msg));
-        methods.add_method("warn", |_lua, this, msg: String| this.warn(msg));
-        methods.add_method("error", |_lua, this, msg: String| this.error(msg));
+        methods.add_method("debug", |_lua, this, msg: String| {
+            this.module.debug(msg);
+            Ok(())
+        });
+        methods.add_method("info", |_lua, this, msg: String| {
+            this.module.info(msg);
+            Ok(())
+        });
+        methods.add_method("warn", |_lua, this, msg: String| {
+            this.module.warn(msg);
+            Ok(())
+        });
+        methods.add_method("error", |_lua, this, msg: String| {
+            this.module.error(msg);
+            Ok(())
+        });
 
-        methods.add_method(
-            "register_action",
-            |lua, this, (name, callback): (String, Function)| {
-                let mut actions = this.module.actions.write().unwrap();
-                if actions.iter().any(|a| a.name == name) {
-                    this.error(format!(
-                        "tried registering action with duplicate name {}",
-                        name
-                    ))?;
-                } else {
-                    this.debug(format!("registering action {}", name))?;
-                    let key = lua.create_registry_value(callback)?;
-                    let action = Action { name, key };
-                    actions.push(action);
-                }
-                Ok(())
-            },
-        );
+        methods.add_method("register_action", |lua, this, (name, callback)| {
+            this.register_action(lua, (name, callback))
+        });
+    }
+}
+
+struct ProcessHandle {
+    child: Child,
+}
+
+impl ProcessHandle {
+    fn write(&self, _lua: &Lua, buf: String) -> mlua::Result<()> {
+        self.child
+            .stdin
+            .as_ref()
+            .unwrap()
+            .write_all(buf.as_bytes())?;
+        Ok(())
+    }
+
+    fn writeln(&self, lua: &Lua, line: String) -> mlua::Result<()> {
+        self.write(lua, line + "\n")
+    }
+}
+
+impl UserData for ProcessHandle {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method("write", |lua, this, buf| this.write(lua, buf));
+        methods.add_method("writeln", |lua, this, line| this.writeln(lua, line));
     }
 }
 

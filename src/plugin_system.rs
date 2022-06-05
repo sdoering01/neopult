@@ -1,5 +1,6 @@
+use ::log::{debug, error, info, warn};
 use anyhow::Context;
-use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti};
+use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
 use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::sync::mpsc;
@@ -13,10 +14,45 @@ const SEPARATOR: &str = "::";
 #[derive(Debug)]
 struct LuaContext {
     plugin_instances: RwLock<Vec<Arc<PluginInstance>>>,
+    event_sender: Arc<mpsc::Sender<Event>>,
+}
+
+trait LogWithPrefix {
+    fn prefix_msg(&self, msg: String) -> String;
+
+    fn debug(&self, msg: String) {
+        debug!("{}", self.prefix_msg(msg));
+    }
+
+    fn info(&self, msg: String) {
+        info!("{}", self.prefix_msg(msg));
+    }
+
+    fn warn(&self, msg: String) {
+        warn!("{}", self.prefix_msg(msg));
+    }
+
+    fn error(&self, msg: String) {
+        error!("{}", self.prefix_msg(msg));
+    }
 }
 
 #[derive(Debug)]
-struct PluginInstance {
+pub enum Event {
+    ProcessOutput {
+        line: String,
+        process_name: String,
+        plugin_instance: Arc<PluginInstance>,
+        callback_key: Arc<RegistryKey>,
+    },
+    CliCommand {
+        command: String,
+        reply_sender: oneshot::Sender<String>,
+    },
+}
+
+#[derive(Debug)]
+pub struct PluginInstance {
     name: String,
     modules: RwLock<Vec<Arc<Module>>>,
 }
@@ -27,6 +63,12 @@ impl PluginInstance {
             name,
             modules: RwLock::new(Vec::new()),
         }
+    }
+}
+
+impl LogWithPrefix for PluginInstance {
+    fn prefix_msg(&self, msg: String) -> String {
+        format!("[{}] {}", self.name, msg)
     }
 }
 
@@ -44,6 +86,15 @@ impl Module {
             plugin_instance_name,
             actions: RwLock::new(Vec::new()),
         }
+    }
+}
+
+impl LogWithPrefix for Module {
+    fn prefix_msg(&self, msg: String) -> String {
+        format!(
+            "[{}{}{}] {}",
+            self.plugin_instance_name, SEPARATOR, self.name, msg
+        )
     }
 }
 
@@ -132,12 +183,14 @@ fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
 }
 
 pub fn start(
-    mut command_receiver: mpsc::Receiver<(String, oneshot::Sender<String>)>,
+    event_sender: mpsc::Sender<Event>,
+    event_receiver: mpsc::Receiver<Event>,
 ) -> anyhow::Result<()> {
     let lua = Lua::new();
 
     let ctx = Arc::new(LuaContext {
         plugin_instances: RwLock::new(Vec::new()),
+        event_sender: Arc::new(event_sender),
     });
 
     let globals = lua.globals();
@@ -150,29 +203,62 @@ pub fn start(
 
     inject_plugin_api(&lua, ctx.clone()).context("error when injecting plugin api")?;
 
+    info!("loading plugins");
+
     lua.load(r#"require("init")"#)
         .set_name("init.lua")?
         .exec()
         .context("error when loading plugins")?;
 
-    while let Some((command, reply_sender)) = command_receiver.blocking_recv() {
-        if command == "list" {
-            let actions = list_actions(&ctx);
-            let reply = actions.join("\n");
-            let _ = reply_sender.send(reply);
-        } else if command.starts_with("call ") {
-            match call_action(&lua, &ctx, &command[5..]) {
-                Ok(_) => {
-                    let _ = reply_sender.send("action called successfully".to_string());
-                }
-                Err(e) => {
-                    let _ = reply_sender.send(format!("error when calling action: {}", e));
-                }
-            }
-        } else {
-            let _ = reply_sender.send(format!("unknown command: {}", command));
-        }
-    }
+    info!("plugins loaded");
+
+    event_loop(&lua, ctx, event_receiver);
 
     Ok(())
+}
+
+fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receiver<Event>) {
+    info!("starting event loop");
+
+    while let Some(event) = event_receiver.blocking_recv() {
+        match event {
+            Event::CliCommand {
+                command,
+                reply_sender,
+            } => {
+                if command == "list" {
+                    let actions = list_actions(&ctx);
+                    let reply = actions.join("\n");
+                    let _ = reply_sender.send(reply);
+                } else if command.starts_with("call ") {
+                    match call_action(&lua, &ctx, &command[5..]) {
+                        Ok(_) => {
+                            let _ = reply_sender.send("action called successfully".to_string());
+                        }
+                        Err(e) => {
+                            let _ = reply_sender.send(format!("error when calling action: {}", e));
+                        }
+                    }
+                } else {
+                    let _ = reply_sender.send(format!("unknown command: {}", command));
+                }
+            }
+            Event::ProcessOutput {
+                line,
+                process_name,
+                plugin_instance,
+                callback_key,
+            } => match lua.registry_value::<Function>(&callback_key) {
+                Ok(callback) => {
+                    if let Err(e) = callback.call::<_, Value>(line) {
+                        plugin_instance.error(format!(
+                            "error when handling callback for process {}: {}",
+                            process_name, e
+                        ));
+                    }
+                }
+                Err(_) => {}
+            },
+        }
+    }
 }

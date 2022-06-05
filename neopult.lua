@@ -11,8 +11,21 @@ PluginInstanceHandle = {}
 -- modules of the plugin instance.
 -- Returns nil if an error occurs (e.g. name is already taken).
 --- @param name string name of the module
---- @return ModuleHandle | nil #module handle or nil if an error occurred
+--- @return ModuleHandle|nil #module handle or nil if an error occurred
 function PluginInstanceHandle:register_module(name) end
+
+-- Runs the provided `cmd`. Returns a process handle or nil if an error
+-- occurrs.
+-- Note that relative paths of the command are relative to the neopult
+-- binary, not the plugin script. Prefer to use executables in the PATH or
+-- provide absolute paths.
+--- @param cmd string executable to be spawned
+--- @param opts? table options
+---  Keys:
+---  - on_output?: function(line: string)
+---    called for each line (line ending excluded) of the process output
+--- @return ProcessHandle|nil #process handle or nil if an error occurred
+function PluginInstanceHandle:spawn_process(cmd, opts) end
 
 -- Like `neopult.log.debug`, but scoped to the plugin instance.
 --- @param msg string message to log
@@ -58,6 +71,18 @@ function ModuleHandle:warn(msg) end
 function ModuleHandle:error(msg) end
 
 
+--- @class ProcessHandle
+ProcessHandle = {}
+
+-- Writes a line to the stdin of the process.
+--- @param str string string to be written
+function ProcessHandle:write(str) end
+
+-- Same as `ProcessHandle:write` but appends '\n' to the line.
+--- @param line string line to be written
+function ProcessHandle:writeln(line) end
+
+
 
 --- @diagnostic disable-next-line
 neopult = {}
@@ -70,7 +95,7 @@ neopult.api = {}
 -- across all plugin instances.
 -- Returns nil if an error occurs (e.g. name is already taken).
 --- @param name string name of the plugin instance
---- @return PluginInstanceHandle | nil #plugin instance handle or nil if an error occurred
+--- @return PluginInstanceHandle|nil #plugin instance handle or nil if an error occurred
 neopult.api.register_plugin_instance = function(name) end
 
 
