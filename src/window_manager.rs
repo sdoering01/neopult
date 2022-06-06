@@ -1,7 +1,12 @@
+// TODO: Remove this
+#![allow(dead_code)]
+
 use anyhow::Context;
 use log::{debug, error, warn};
+use mlua::{Lua, RegistryKey};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::sync::Arc;
 use xcb::{randr, x, Connection};
 
@@ -12,8 +17,154 @@ pub type ManagedWid = usize;
 #[derive(Debug)]
 pub struct ManagedWindow {
     id: ManagedWid,
-    geometry: Geometry,
     variant: WindowVariant,
+    min_geometry: MinGeometry,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Geometry {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Alignment {
+    TopLeft,
+    TopRight,
+    BottomRight,
+    BottomLeft,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AlignedGeometry {
+    x_offset: u16,
+    y_offset: u16,
+    width: u16,
+    height: u16,
+    alignment: Alignment,
+}
+
+impl FromStr for AlignedGeometry {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let x_offset_sign;
+        let y_offset_sign;
+
+        let (s, width) = match s.chars().position(|c| c == 'x') {
+            Some(pos) => (
+                &s[(pos + 1)..],
+                u16::from_str(&s[..pos]).context("width is not numeric")?,
+            ),
+            None => anyhow::bail!("expected 'x' after width"),
+        };
+
+        let (s, height) = match s.chars().enumerate().find(|&(_, c)| c == '+' || c == '-') {
+            Some((pos, sign)) => {
+                x_offset_sign = sign;
+                (
+                    &s[(pos + 1)..],
+                    u16::from_str(&s[..pos]).context("height is not numeric")?,
+                )
+            }
+            None => anyhow::bail!("expected '+' or '-' after height"),
+        };
+
+        let (s, x_offset) = match s.chars().enumerate().find(|&(_, c)| c == '+' || c == '-') {
+            Some((pos, sign)) => {
+                y_offset_sign = sign;
+                (
+                    &s[(pos + 1)..],
+                    u16::from_str(&s[..pos]).context("x offset is not numeric")?,
+                )
+            }
+            None => anyhow::bail!("expected '+' or '-' after x offset"),
+        };
+
+        let y_offset = u16::from_str(s).context("y offset is not numeric")?;
+
+        let alignment = match (x_offset_sign, y_offset_sign) {
+            ('+', '+') => Alignment::TopLeft,
+            ('-', '+') => Alignment::TopRight,
+            ('-', '-') => Alignment::BottomRight,
+            ('+', '-') => Alignment::BottomLeft,
+            _ => unreachable!(),
+        };
+
+        Ok(AlignedGeometry {
+            x_offset,
+            y_offset,
+            width,
+            height,
+            alignment,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum MinGeometry {
+    Fixed(AlignedGeometry),
+    Dynamic { callback_key: Arc<RegistryKey> },
+}
+
+impl Default for MinGeometry {
+    fn default() -> Self {
+        MinGeometry::Fixed(AlignedGeometry {
+            x_offset: 0,
+            y_offset: 0,
+            width: 480,
+            height: 360,
+            alignment: Alignment::BottomRight,
+        })
+    }
+}
+
+impl FromStr for MinGeometry {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let aligned_geometry = AlignedGeometry::from_str(s)?;
+        Ok(MinGeometry::Fixed(aligned_geometry))
+    }
+}
+
+impl MinGeometry {
+    fn get_geometry(&self, wm: &WindowManager, _lua: &Lua) -> Geometry {
+        match self {
+            MinGeometry::Fixed(AlignedGeometry {
+                x_offset,
+                y_offset,
+                width,
+                height,
+                alignment,
+            }) => {
+                let (x, y) = match alignment {
+                    Alignment::TopLeft => (*x_offset, *y_offset),
+                    Alignment::TopRight => (wm.screen_width - *width - *x_offset, *y_offset),
+                    Alignment::BottomRight => (
+                        wm.screen_width - *width - *x_offset,
+                        wm.screen_height - *height - *y_offset,
+                    ),
+                    Alignment::BottomLeft => (*x_offset, wm.screen_height - *height - *y_offset),
+                };
+                Geometry {
+                    x: x as i16,
+                    y: y as i16,
+                    width: *width,
+                    height: *height,
+                }
+            }
+            // TODO: Call lua function to get geometry
+            MinGeometry::Dynamic { callback_key: _ } => Geometry {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -22,24 +173,12 @@ enum WindowVariant {
     VirtualWindow,
 }
 
-#[derive(Debug)]
-pub struct Geometry {
-    x: i16,
-    y: i16,
-    w: u16,
-    h: u16,
-}
-
-impl Geometry {
-    fn new(x: i16, y: i16, w: u16, h: u16) -> Self {
-        Self { x, y, w, h }
-    }
-}
-
 // NOTE: Remember to adjust Debug implementation when changing something here
 pub struct WindowManager {
     conn: Connection,
     screen: x::ScreenBuf,
+    screen_height: u16,
+    screen_width: u16,
     current_id: ManagedWid,
     managed_windows: HashMap<ManagedWid, ManagedWindow>,
 }
@@ -73,23 +212,35 @@ impl WindowManager {
         let setup = conn.get_setup();
         let screen = setup.roots().nth(screen_num as usize).unwrap().to_owned();
 
-        // Check that the X server is a VNC server
-        let cookie = conn.send_request(&randr::GetScreenResources {
+        let screen_res_cookie = conn.send_request(&randr::GetScreenResources {
             window: screen.root(),
         });
-        let screen_res_resp = conn
-            .wait_for_reply(cookie)
+        let screen_res_reply = conn
+            .wait_for_reply(screen_res_cookie)
             .context("error while waiting for GetScreenResources reply")?;
-        let output = screen_res_resp.outputs()[0];
+        let output = screen_res_reply.outputs()[0];
+        let crtc = screen_res_reply.crtcs()[0];
 
-        let cookie = conn.send_request(&randr::GetOutputInfo {
+        let crtc_info_cookie = conn.send_request(&randr::GetCrtcInfo {
+            crtc,
+            config_timestamp: x::CURRENT_TIME,
+        });
+
+        let output_info_cookie = conn.send_request(&randr::GetOutputInfo {
             output,
             config_timestamp: x::CURRENT_TIME,
         });
-        let output_info_resp = conn
-            .wait_for_reply(cookie)
+
+        let crtc_info_reply = conn
+            .wait_for_reply(crtc_info_cookie)
+            .context("error while waiting for GetCrtcInfo reply")?;
+        let screen_height = crtc_info_reply.height();
+        let screen_width = crtc_info_reply.width();
+
+        let output_info_reply = conn
+            .wait_for_reply(output_info_cookie)
             .context("error while waiting for GetOutputInfo reply")?;
-        let output_name = String::from_utf8_lossy(output_info_resp.name());
+        let output_name = String::from_utf8_lossy(output_info_reply.name());
 
         if !output_name.starts_with("VNC") {
             anyhow::bail!(
@@ -101,6 +252,8 @@ impl WindowManager {
         Ok(WindowManager {
             conn,
             screen: screen.to_owned(),
+            screen_height,
+            screen_width,
             current_id: 0,
             managed_windows: HashMap::new(),
         })
@@ -148,12 +301,6 @@ impl WindowManager {
     }
 
     pub fn manage_x_window(&mut self, window: x::Window) -> xcb::Result<ManagedWid> {
-        // TODO: Somehow mark the x window as managed, so it can't be claimed again
-        // TODO: Query window geometry and set it accordingly
-        let geometry_cookie = self.conn.send_request(&x::GetGeometry {
-            drawable: x::Drawable::Window(window),
-        });
-
         self.conn.send_and_check_request(&x::ChangeProperty {
             mode: x::PropMode::Prepend,
             window,
@@ -161,24 +308,62 @@ impl WindowManager {
             r#type: x::ATOM_STRING,
             data: MANAGED_HINT.as_bytes(),
         })?;
-
-        let geometry_reply = self.conn.wait_for_reply(geometry_cookie)?;
-        let geometry = Geometry::new(
-            geometry_reply.x(),
-            geometry_reply.y(),
-            geometry_reply.width(),
-            geometry_reply.height(),
-        );
-
         let id = self.current_id;
         let managed_window = ManagedWindow {
             id,
-            geometry,
             variant: WindowVariant::XWindow { window },
+            min_geometry: MinGeometry::default(),
         };
         self.managed_windows.insert(id, managed_window);
         self.current_id += 1;
 
+        // TODO: Set geometry of window
+
         Ok(id)
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_aligned_geometry_from_str() {
+        let s = "400x300+200-100";
+        let min_position = AlignedGeometry::from_str(s).unwrap();
+        assert_eq!(
+            min_position,
+            AlignedGeometry {
+                width: 400,
+                height: 300,
+                x_offset: 200,
+                y_offset: 100,
+                alignment: Alignment::BottomLeft
+            }
+        );
+
+        let s = "480x360-0-0";
+        let min_position = AlignedGeometry::from_str(s).unwrap();
+        assert_eq!(
+            min_position,
+            AlignedGeometry {
+                width: 480,
+                height: 360,
+                x_offset: 0,
+                y_offset: 0,
+                alignment: Alignment::BottomRight
+            }
+        );
+
+        let s = "";
+        assert!(AlignedGeometry::from_str(s).is_err());
+
+        let s = "-100x-100-0-0";
+        assert!(AlignedGeometry::from_str(s).is_err());
+
+        let s = "480x360";
+        assert!(AlignedGeometry::from_str(s).is_err());
+
+        let s = "100x100-0-0 ";
+        assert!(AlignedGeometry::from_str(s).is_err());
     }
 }
