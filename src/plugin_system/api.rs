@@ -62,7 +62,7 @@ impl PluginInstanceHandle {
             }
             Ok(c) => {
                 self.plugin_instance
-                    .debug(format!("spawned process {}", cmd));
+                    .debug(format!("spawned process {} (PID {})", cmd, c.id()));
                 c
             }
         };
@@ -81,6 +81,7 @@ impl PluginInstanceHandle {
             let process_name = cmd;
             let plugin_instance = self.plugin_instance.clone();
             let callback_key = Arc::new(key);
+            let pid = child.id();
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line_result in reader.lines() {
@@ -102,8 +103,8 @@ impl PluginInstanceHandle {
                         }
                         Err(e) => {
                             plugin_instance.error(format!(
-                                "error while reading stdout of process {}: {}",
-                                process_name, e
+                                "error while reading stdout of process {} (PID {}): {}",
+                                process_name, pid, e
                             ));
                         }
                     }
