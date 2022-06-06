@@ -14,7 +14,7 @@ M.setup = function()
         module_handle = plugin_handle:register_module("xclock")
 
         plugin_handle:spawn_process("xclock")
-        local xclock_handle = plugin_handle:claim_window("xclock")
+        local xclock_handle = plugin_handle:claim_window("xclock", { min_geometry = "200x200-0+0" })
 
         plugin_handle:info("Trying to claim already claimed xclock window, this should result in a warning")
         plugin_handle:claim_window("xclock")

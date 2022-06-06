@@ -1,7 +1,7 @@
 use crate::plugin_system::{
     create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, PluginInstance,
 };
-use crate::window_manager::ManagedWid;
+use crate::window_manager::{ManagedWid, MinGeometry};
 use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
 use std::io::{prelude::*, BufReader};
@@ -127,12 +127,29 @@ impl PluginInstanceHandle {
 
         let poll_interval_ms = 50;
         let mut timeout_ms = 250;
+        let mut min_geometry = MinGeometry::default();
 
         if let Value::Table(opts_table) = opts {
             if let Ok(timeout) = opts_table.get::<_, u64>("timeout_ms") {
                 timeout_ms = timeout;
             }
+            if let Ok(min_geometry_str) = opts_table.get::<_, String>("min_geometry") {
+                match min_geometry_str.parse() {
+                    Ok(parsed) => min_geometry = parsed,
+                    Err(e) => {
+                        self.plugin_instance.warn(format!(
+                            "invalid geometry string for window with name {} (using default): {}",
+                            name, e
+                        ));
+                    }
+                };
+            }
         }
+
+        self.plugin_instance.debug(format!(
+            "Using min geometry for window with name {}: {:?}",
+            name, min_geometry
+        ));
 
         let mut window_manager = self.ctx.window_manager.write().unwrap();
 
@@ -144,7 +161,7 @@ impl PluginInstanceHandle {
                         "Got window with name {}; letting the window manager manage it",
                         name
                     ));
-                    match window_manager.manage_x_window(window) {
+                    match window_manager.manage_x_window(lua, window, min_geometry.clone()) {
                         Ok(id) => {
                             let window_handle = WindowHandle { id };
                             return lua.pack(window_handle);

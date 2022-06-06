@@ -37,6 +37,12 @@ function PluginInstanceHandle:spawn_process(cmd, opts) end
 ---  Keys:
 ---  - timeout_ms?: integer (DEFAULT: 250)
 ---    how many milliseconds to wait for the window at most
+---  - min_geometry?: string
+---    geometry to use in the min mode; if not present a default value is used;
+---    the string should have the format
+---    "<width>x<height><'+'|'-'><x_offset><'+'|'-'><y_offset>". Positive
+---    x_offset and y_offset define the offset from the top and left, negative
+---    x_offset and y_offset define the offset from the bottom and right.
 --- @return WindowHandle|nil #window handle or nil if an error occured
 function PluginInstanceHandle:claim_window(name, opts) end
 
