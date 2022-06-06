@@ -1,3 +1,4 @@
+use crate::window_manager::WindowManager;
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
@@ -15,6 +16,7 @@ const SEPARATOR: &str = "::";
 struct LuaContext {
     plugin_instances: RwLock<Vec<Arc<PluginInstance>>>,
     event_sender: Arc<mpsc::Sender<Event>>,
+    window_manager: RwLock<WindowManager>,
 }
 
 trait LogWithPrefix {
@@ -185,12 +187,14 @@ fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
 pub fn start(
     event_sender: mpsc::Sender<Event>,
     event_receiver: mpsc::Receiver<Event>,
+    window_manager: WindowManager,
 ) -> anyhow::Result<()> {
     let lua = Lua::new();
 
     let ctx = Arc::new(LuaContext {
         plugin_instances: RwLock::new(Vec::new()),
         event_sender: Arc::new(event_sender),
+        window_manager: RwLock::new(window_manager),
     });
 
     let globals = lua.globals();

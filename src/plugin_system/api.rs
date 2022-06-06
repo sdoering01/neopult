@@ -1,12 +1,14 @@
 use crate::plugin_system::{
     create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, PluginInstance,
 };
+use crate::window_manager::ManagedWid;
 use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
 use std::io::{prelude::*, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 struct PluginInstanceHandle {
@@ -15,6 +17,33 @@ struct PluginInstanceHandle {
 }
 
 impl PluginInstanceHandle {
+    fn register_module<'lua>(
+        &self,
+        lua: &'lua Lua,
+        (name, _args): (String, Value),
+    ) -> mlua::Result<Value<'lua>> {
+        let mut modules = self.plugin_instance.modules.write().unwrap();
+
+        if modules.iter().any(|m| m.name == name) {
+            self.plugin_instance.error(format!(
+                "tried registering module with duplicate name {}",
+                name
+            ));
+            Ok(Value::Nil)
+        } else {
+            self.plugin_instance
+                .debug(format!("registering module {}", name));
+            let module = Arc::new(Module::new(name, self.plugin_instance.name.clone()));
+            let module_handle = ModuleHandle {
+                module: module.clone(),
+                ctx: self.ctx.clone(),
+            };
+            modules.push(module);
+            let val = lua.pack(module_handle)?;
+            Ok(val)
+        }
+    }
+
     fn spawn_process<'lua>(
         &self,
         lua: &'lua Lua,
@@ -87,31 +116,63 @@ impl PluginInstanceHandle {
         lua.pack(process_handle)
     }
 
-    fn register_module<'lua>(
+    fn claim_window<'lua>(
         &self,
         lua: &'lua Lua,
-        (name, _args): (String, Value),
+        (name, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
-        let mut modules = self.plugin_instance.modules.write().unwrap();
+        self.plugin_instance
+            .debug(format!("Claiming window with name {}", name));
 
-        if modules.iter().any(|m| m.name == name) {
-            self.plugin_instance.error(format!(
-                "tried registering module with duplicate name {}",
-                name
-            ));
-            Ok(Value::Nil)
-        } else {
-            self.plugin_instance
-                .debug(format!("registering module {}", name));
-            let module = Arc::new(Module::new(name, self.plugin_instance.name.clone()));
-            let module_handle = ModuleHandle {
-                module: module.clone(),
-                ctx: self.ctx.clone(),
-            };
-            modules.push(module);
-            let val = lua.pack(module_handle)?;
-            Ok(val)
+        let poll_interval_ms = 50;
+        let mut timeout_ms = 250;
+
+        if let Value::Table(opts_table) = opts {
+            if let Ok(timeout) = opts_table.get::<_, u64>("timeout_ms") {
+                timeout_ms = timeout;
+            }
         }
+
+        let mut window_manager = self.ctx.window_manager.write().unwrap();
+
+        let timeout_end = Instant::now() + Duration::from_millis(timeout_ms);
+        while Instant::now() < timeout_end {
+            match window_manager.get_window_by_name(&name) {
+                Ok(Some(window)) => {
+                    self.plugin_instance.debug(format!(
+                        "Got window with name {}; letting the window manager manage it",
+                        name
+                    ));
+                    match window_manager.manage_x_window(window) {
+                        Ok(id) => {
+                            let window_handle = WindowHandle { id };
+                            return lua.pack(window_handle);
+                        }
+                        Err(e) => {
+                            self.plugin_instance
+                                .error(format!("Couldn't manage window with name {}: {}", name, e));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    let sleep_time = std::cmp::min(
+                        Duration::from_millis(poll_interval_ms),
+                        timeout_end - Instant::now(),
+                    );
+                    if !sleep_time.is_zero() {
+                        thread::sleep(sleep_time);
+                    }
+                }
+                Err(e) => {
+                    self.plugin_instance
+                        .error(format!("Error getting window with name {}: {}", name, e));
+                }
+            }
+        }
+
+        self.plugin_instance
+            .warn(format!("Couldn't claim window with name {}", name));
+        Ok(Value::Nil)
     }
 }
 
@@ -140,6 +201,10 @@ impl UserData for PluginInstanceHandle {
 
         methods.add_method("spawn_process", |lua, this, (cmd, opts)| {
             this.spawn_process(lua, (cmd, opts))
+        });
+
+        methods.add_method("claim_window", |lua, this, (name, opts)| {
+            this.claim_window(lua, (name, opts))
         });
     }
 }
@@ -217,6 +282,12 @@ impl UserData for ProcessHandle {
         methods.add_method("writeln", |lua, this, line| this.writeln(lua, line));
     }
 }
+
+struct WindowHandle {
+    id: ManagedWid,
+}
+
+impl UserData for WindowHandle {}
 
 fn register_plugin_instance<'lua>(
     lua: &'lua Lua,
