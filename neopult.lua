@@ -27,12 +27,12 @@ function PluginInstanceHandle:register_module(name) end
 --- @return ProcessHandle|nil #process handle or nil if an error occurred
 function PluginInstanceHandle:spawn_process(cmd, opts) end
 
--- Claims a window that is not already managed and whose title (WM_NAME atom)
--- contains `name`. This operation blocks for at most `opts.timeout_ms`
+-- Claims a window that is not already managed and whose class (WM_CLASS atom)
+-- contains `class`. This operation blocks for at most `opts.timeout_ms`
 -- milliseconds.
 -- This function should be used to claim a window of a process that was spawned
 -- before.
---- @param name string substring of window's title
+--- @param class string substring of window's class
 --- @param opts? table options
 ---  Keys:
 ---  - timeout_ms?: integer (DEFAULT: 250)
@@ -44,7 +44,7 @@ function PluginInstanceHandle:spawn_process(cmd, opts) end
 ---    x_offset and y_offset define the offset from the top and left, negative
 ---    x_offset and y_offset define the offset from the bottom and right.
 --- @return WindowHandle|nil #window handle or nil if an error occured
-function PluginInstanceHandle:claim_window(name, opts) end
+function PluginInstanceHandle:claim_window(class, opts) end
 
 -- Like `neopult.log.debug`, but scoped to the plugin instance.
 --- @param msg string message to log

@@ -120,10 +120,10 @@ impl PluginInstanceHandle {
     fn claim_window<'lua>(
         &self,
         lua: &'lua Lua,
-        (name, opts): (String, Value),
+        (class, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
         self.plugin_instance
-            .debug(format!("Claiming window with name {}", name));
+            .debug(format!("Claiming window with class {}", class));
 
         let poll_interval_ms = 50;
         let mut timeout_ms = 250;
@@ -138,8 +138,8 @@ impl PluginInstanceHandle {
                     Ok(parsed) => min_geometry = parsed,
                     Err(e) => {
                         self.plugin_instance.warn(format!(
-                            "invalid geometry string for window with name {} (using default): {}",
-                            name, e
+                            "invalid geometry string for window with class {} (using default): {}",
+                            class, e
                         ));
                     }
                 };
@@ -147,28 +147,32 @@ impl PluginInstanceHandle {
         }
 
         self.plugin_instance.debug(format!(
-            "Using min geometry for window with name {}: {:?}",
-            name, min_geometry
+            "Using min geometry for window with class {}: {:?}",
+            class, min_geometry
         ));
 
         let mut window_manager = self.ctx.window_manager.write().unwrap();
 
         let timeout_end = Instant::now() + Duration::from_millis(timeout_ms);
         while Instant::now() < timeout_end {
-            match window_manager.get_window_by_name(&name) {
+            match window_manager.get_window_by_class(&class) {
                 Ok(Some(window)) => {
                     self.plugin_instance.debug(format!(
-                        "Got window with name {}; letting the window manager manage it",
-                        name
+                        "Got window with class {}; letting the window manager manage it",
+                        class
                     ));
                     match window_manager.manage_x_window(lua, window, min_geometry.clone()) {
                         Ok(id) => {
-                            let window_handle = WindowHandle { id };
+                            let window_handle = WindowHandle {
+                                id,
+                                ctx: self.ctx.clone(),
+                                plugin_instance: self.plugin_instance.clone(),
+                            };
                             return lua.pack(window_handle);
                         }
                         Err(e) => {
                             self.plugin_instance
-                                .error(format!("Couldn't manage window with name {}: {}", name, e));
+                                .error(format!("Couldn't manage window with class {}: {}", class, e));
                         }
                     }
                 }
@@ -183,13 +187,15 @@ impl PluginInstanceHandle {
                 }
                 Err(e) => {
                     self.plugin_instance
-                        .error(format!("Error getting window with name {}: {}", name, e));
+                        .error(format!("Error getting window with class {}: {}", class, e));
                 }
             }
         }
 
-        self.plugin_instance
-            .warn(format!("Couldn't claim window with name {}", name));
+        self.plugin_instance.warn(format!(
+            "Couldn't claim window with class {} (timeout)",
+            class
+        ));
         Ok(Value::Nil)
     }
 }
@@ -221,8 +227,8 @@ impl UserData for PluginInstanceHandle {
             this.spawn_process(lua, (cmd, opts))
         });
 
-        methods.add_method("claim_window", |lua, this, (name, opts)| {
-            this.claim_window(lua, (name, opts))
+        methods.add_method("claim_window", |lua, this, (class, opts)| {
+            this.claim_window(lua, (class, opts))
         });
     }
 }
@@ -303,9 +309,76 @@ impl UserData for ProcessHandle {
 
 struct WindowHandle {
     id: ManagedWid,
+    ctx: Arc<LuaContext>,
+    plugin_instance: Arc<PluginInstance>,
 }
 
-impl UserData for WindowHandle {}
+impl WindowHandle {
+    fn max(&self, lua: &Lua, size: Value) -> mlua::Result<()> {
+        self.plugin_instance.debug(format!(
+            "setting mode of window with managed wid {} to max",
+            self.id
+        ));
+
+        let width;
+        let height;
+
+        match size {
+            Value::Table(size_table) => {
+                width = match size_table.get::<_, u16>(1) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        self.plugin_instance
+                            .error(format!("couldn't get width: {}", e));
+                        return Ok(());
+                    }
+                };
+
+                height = match size_table.get::<_, u16>(2) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        self.plugin_instance
+                            .error(format!("couldn't get height: {}", e));
+                        return Ok(());
+                    }
+                };
+            }
+            _ => {
+                self.plugin_instance
+                    .error("first argument of max isn't a table".to_string());
+                return Ok(());
+            }
+        }
+
+        let mut wm = self.ctx.window_manager.write().unwrap();
+        if let Err(e) = wm.max_window(lua, self.id, (width, height)) {
+            self.plugin_instance
+                .error(format!("error setting window mode to max: {}", e));
+        }
+
+        Ok(())
+    }
+
+    fn min(&self, lua: &Lua) -> mlua::Result<()> {
+        self.plugin_instance.debug(format!(
+            "setting mode of window with managed wid {} to min",
+            self.id
+        ));
+        let mut wm = self.ctx.window_manager.write().unwrap();
+        if let Err(e) = wm.min_window(lua, self.id) {
+            self.plugin_instance
+                .error(format!("error setting window mode to min: {}", e));
+        }
+        Ok(())
+    }
+}
+
+impl UserData for WindowHandle {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method("max", |lua, this, size| this.max(lua, size));
+        methods.add_method("min", |lua, this, ()| this.min(lua));
+    }
+}
 
 fn register_plugin_instance<'lua>(
     lua: &'lua Lua,

@@ -1,16 +1,13 @@
-// TODO: Remove this
-#![allow(dead_code)]
-
 use anyhow::Context;
 use log::{debug, error, warn};
 use mlua::{Lua, RegistryKey};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::str::FromStr;
+use std::str::{self, FromStr};
 use std::sync::Arc;
 use xcb::{randr, x, Connection, Xid};
 
-const MANAGED_HINT: &str = "(managed by NeoPULT) ";
+const MANAGED_HINT: &str = "MANAGED";
 
 pub type ManagedWid = usize;
 
@@ -19,6 +16,13 @@ pub struct ManagedWindow {
     id: ManagedWid,
     variant: WindowVariant,
     min_geometry: MinGeometry,
+    mode: Mode,
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum Mode {
+    Max { width: u16, height: u16 },
+    Min,
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -27,6 +31,17 @@ struct Geometry {
     y: i16,
     width: u16,
     height: u16,
+}
+
+impl Geometry {
+    fn from_width_height(width: u16, height: u16) -> Self {
+        Geometry {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -158,12 +173,7 @@ impl MinGeometry {
         match self {
             MinGeometry::Fixed(aligned_geometry) => aligned_geometry.into_geometry(wm),
             // TODO: Call lua function to get geometry
-            MinGeometry::Dynamic { callback_key: _ } => Geometry {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            },
+            MinGeometry::Dynamic { callback_key: _ } => todo!(),
         }
     }
 }
@@ -182,6 +192,8 @@ pub struct WindowManager {
     screen_width: u16,
     current_id: ManagedWid,
     managed_windows: HashMap<ManagedWid, ManagedWindow>,
+    primary_window: Option<ManagedWid>,
+    managed_atom: x::Atom,
 }
 
 // xcb::Connection doesn't implement Debug, so we have to implement Debug ourselves
@@ -189,8 +201,12 @@ impl Debug for WindowManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WindowManager")
             .field("screen", &self.screen)
+            .field("screen_height", &self.screen_height)
+            .field("screen_width", &self.screen_width)
             .field("current_id", &self.screen)
             .field("managed_windows", &self.managed_windows)
+            .field("primary_window", &self.primary_window)
+            .field("managed_atom", &self.managed_atom)
             .finish()
     }
 }
@@ -235,8 +251,9 @@ impl WindowManager {
         let crtc_info_reply = conn
             .wait_for_reply(crtc_info_cookie)
             .context("error while waiting for GetCrtcInfo reply")?;
-        let screen_height = crtc_info_reply.height();
         let screen_width = crtc_info_reply.width();
+        let screen_height = crtc_info_reply.height();
+        debug!("screen has size {}x{}", screen_width, screen_height);
 
         let output_info_reply = conn
             .wait_for_reply(output_info_cookie)
@@ -250,6 +267,21 @@ impl WindowManager {
             );
         }
 
+        let managed_atom_name = "_NEOPULT_MANAGED";
+        debug!(
+            "creating intern atom for managed state with name {}",
+            managed_atom_name
+        );
+
+        let cookie = conn.send_request(&x::InternAtom {
+            only_if_exists: false,
+            name: managed_atom_name.as_bytes(),
+        });
+        let reply = conn
+            .wait_for_reply(cookie)
+            .context("error while waiting for intern atom reply")?;
+        let managed_atom = reply.atom();
+
         Ok(WindowManager {
             conn,
             screen: screen.to_owned(),
@@ -257,10 +289,12 @@ impl WindowManager {
             screen_width,
             current_id: 0,
             managed_windows: HashMap::new(),
+            primary_window: None,
+            managed_atom,
         })
     }
 
-    pub fn get_window_by_name(&self, to_claim: &str) -> anyhow::Result<Option<x::Window>> {
+    pub fn get_window_by_class(&self, to_claim: &str) -> anyhow::Result<Option<x::Window>> {
         let cookie = self.conn.send_request(&x::QueryTree {
             window: self.screen.root(),
         });
@@ -271,28 +305,40 @@ impl WindowManager {
 
         let children: &[x::Window] = reply.children();
 
-        let mut children_name_cookies = Vec::with_capacity(children.len());
+        let mut children_cookies = Vec::with_capacity(children.len());
 
         for child in children.iter() {
-            let cookie = self.conn.send_request(&x::GetProperty {
+            let class_cookie = self.conn.send_request(&x::GetProperty {
                 delete: false,
                 window: *child,
-                property: x::ATOM_WM_NAME,
+                property: x::ATOM_WM_CLASS,
                 r#type: x::ATOM_STRING,
                 long_offset: 0,
                 // Amount of chars of name to retrieve
                 long_length: 128,
             });
-            children_name_cookies.push(cookie);
+            let managed_cookie = self.conn.send_request(&x::GetProperty {
+                delete: false,
+                window: *child,
+                property: self.managed_atom,
+                r#type: x::ATOM_STRING,
+                long_offset: 0,
+                long_length: MANAGED_HINT.len() as u32,
+            });
+            children_cookies.push((class_cookie, managed_cookie));
         }
 
-        for (cookie, &window) in children_name_cookies.into_iter().zip(children) {
-            match self.conn.wait_for_reply(cookie) {
-                Err(e) => error!("error while waiting for WM_NAME reply: {}", e),
-                Ok(reply) => {
-                    let name = String::from_utf8_lossy(reply.value());
-                    if name.contains(to_claim) && !name.starts_with(MANAGED_HINT) {
-                        return Ok(Some(window));
+        for ((name_cookie, managed_cookie), &window) in children_cookies.into_iter().zip(children) {
+            match self.conn.wait_for_reply(name_cookie) {
+                Err(e) => error!("error while waiting for WM_CLASS reply: {}", e),
+                Ok(class_reply) => {
+                    let class = String::from_utf8_lossy(class_reply.value());
+                    if class.contains(to_claim) {
+                        let managed_reply = self.conn.wait_for_reply(managed_cookie)?;
+                        let managed_hint = str::from_utf8(managed_reply.value()).unwrap();
+                        if managed_hint != MANAGED_HINT {
+                            return Ok(Some(window));
+                        }
                     }
                 }
             }
@@ -308,9 +354,9 @@ impl WindowManager {
         min_geometry: MinGeometry,
     ) -> xcb::Result<ManagedWid> {
         self.conn.send_and_check_request(&x::ChangeProperty {
-            mode: x::PropMode::Prepend,
+            mode: x::PropMode::Replace,
             window,
-            property: x::ATOM_WM_NAME,
+            property: self.managed_atom,
             r#type: x::ATOM_STRING,
             data: MANAGED_HINT.as_bytes(),
         })?;
@@ -319,48 +365,138 @@ impl WindowManager {
             id,
             variant: WindowVariant::XWindow { window },
             min_geometry,
+            mode: Mode::Min,
         };
+
         let geometry = managed_window.min_geometry.get_geometry(self, lua);
+        self.change_window_geometry(&managed_window, geometry)?;
+
         self.managed_windows.insert(id, managed_window);
         self.current_id += 1;
-
-        self.change_window_geometry(id, geometry)?;
 
         Ok(id)
     }
 
-    // The caller must ensure that `id` is the id of a managed window
-    fn change_window_geometry(&self, id: ManagedWid, geometry: Geometry) -> xcb::Result<()> {
+    pub fn max_window(
+        &mut self,
+        lua: &Lua,
+        id: ManagedWid,
+        (width, height): (u16, u16),
+    ) -> anyhow::Result<()> {
+        match self.managed_windows.get_mut(&id) {
+            Some(window) => {
+                window.mode = Mode::Max { width, height };
+            }
+            None => {
+                anyhow::bail!("there is no managed window for the managed wid {}", id);
+            }
+        };
+
+        self.primary_window = Some(id);
+        self.reposition_windows(lua)?;
+
+        Ok(())
+    }
+
+    pub fn min_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
+        match self.managed_windows.get_mut(&id) {
+            Some(window) => {
+                window.mode = Mode::Min;
+            }
+            None => {
+                anyhow::bail!("there is no managed window for the managed wid {}", id);
+            }
+        };
+
+        if self.primary_window == Some(id) {
+            debug!("primary window set to min, finding new primary window");
+            self.primary_window = self.find_new_primary_window();
+            match self.primary_window {
+                Some(wid) => debug!("found new primary window with managed wid {}", wid),
+                None => debug!("didn't find new primary window"),
+            }
+            self.reposition_windows(lua)?;
+        }
+
         let window = self.managed_windows.get(&id).unwrap();
-        match window.variant {
+        self.change_window_geometry(window, window.min_geometry.get_geometry(self, lua))?;
+
+        Ok(())
+    }
+
+    fn reposition_windows(&mut self, lua: &Lua) -> anyhow::Result<()> {
+        if let Some(primary_window_id) = self.primary_window {
+            let primary_window = self
+                .managed_windows
+                .get(&primary_window_id)
+                .expect("primary window is not a managed window");
+            match primary_window.mode {
+                Mode::Max { width, height } => {
+                    self.change_window_geometry(
+                        primary_window,
+                        Geometry::from_width_height(width, height),
+                    )?;
+                    self.change_screen_resolution((width, height))?;
+                }
+                Mode::Min => {
+                    anyhow::bail!("primary window isn't in max mode");
+                }
+            }
+        }
+
+        // TODO: Define some kind of z-order to handle overlapping min windows
+        for window in self.managed_windows.values() {
+            if window.mode == Mode::Min {
+                self.change_window_geometry(window, window.min_geometry.get_geometry(self, lua))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn find_new_primary_window(&mut self) -> Option<ManagedWid> {
+        // TODO: Implement some kind of order, so that the window that was max most recently is the
+        // new primary window?
+        self.managed_windows
+            .values()
+            .find(|w| matches!(w.mode, Mode::Max { .. }))
+            .map(|w| w.id)
+    }
+
+    fn change_window_geometry(
+        &self,
+        managed_window: &ManagedWindow,
+        geometry: Geometry,
+    ) -> xcb::Result<()> {
+        match managed_window.variant {
             WindowVariant::XWindow { window } => {
-                self.conn.send_request(&x::ConfigureWindow {
+                self.conn.send_and_check_request(&x::ConfigureWindow {
                     window,
                     value_list: &[
                         x::ConfigWindow::X(geometry.x as i32),
                         x::ConfigWindow::Y(geometry.y as i32),
                         x::ConfigWindow::Width(geometry.width as u32),
                         x::ConfigWindow::Height(geometry.height as u32),
+                        // This also raises the window
+                        x::ConfigWindow::StackMode(x::StackMode::Above),
                     ],
-                });
+                })?;
             }
+            // TODO: Implement for virtual windows, remember to also raise the window
             WindowVariant::VirtualWindow => todo!(),
         }
 
         Ok(())
     }
 
-    // This is copied from a proof of concept implementation
-    // TODO: Adjust to current implementation
-    fn set_resolution(
-        conn: &xcb::Connection,
-        screen: &x::Screen,
+    fn change_screen_resolution(
+        &mut self,
         (target_width, target_height): (u16, u16),
     ) -> xcb::Result<()> {
-        let cookie = conn.send_request(&randr::GetScreenSizeRange {
-            window: screen.root(),
+        let cookie = self.conn.send_request(&randr::GetScreenSizeRange {
+            window: self.screen.root(),
         });
-        let screen_size_range = conn.wait_for_reply(cookie)?;
+        let screen_size_range = self.conn.wait_for_reply(cookie)?;
 
         if target_width < screen_size_range.min_width()
             || target_width > screen_size_range.max_width()
@@ -381,25 +517,21 @@ impl WindowManager {
             );
         }
 
-        let cookie = conn.send_request(&randr::GetScreenResources {
-            window: screen.root(),
+        let cookie = self.conn.send_request(&randr::GetScreenResources {
+            window: self.screen.root(),
         });
-        let screen_resources = conn.wait_for_reply(cookie)?;
+        let screen_resources = self.conn.wait_for_reply(cookie)?;
 
         let crtc = *screen_resources
             .crtcs()
             .first()
             .expect("no crtc in screen resources");
-        let output = *screen_resources
-            .outputs()
-            .first()
-            .expect("no output in screen resources");
 
-        let cookie = conn.send_request(&randr::GetCrtcInfo {
+        let cookie = self.conn.send_request(&randr::GetCrtcInfo {
             crtc,
             config_timestamp: x::CURRENT_TIME,
         });
-        let crtc_info = conn.wait_for_reply(cookie)?;
+        let crtc_info = self.conn.wait_for_reply(cookie)?;
         let current_width = crtc_info.width();
         let current_height = crtc_info.height();
 
@@ -407,97 +539,125 @@ impl WindowManager {
             return Ok(());
         }
 
-        // If one dimension grows and the other shrinks, we do it in two steps:
+        // If one dimension grows and the other shrinks, we resize in two steps:
         //  1. Grow the one dimension of the screen to the bigger target dimension
         //  2. Shrink the other dimension of the screen to the smaller target dimension
         if target_width < current_width && target_height > current_height {
-            // randr_set_screen_size(conn, screen, (current_width, target_height))?;
+            self.randr_set_screen_size((current_width, target_height))?;
         }
 
         if target_width > current_width && target_height < current_height {
-            // randr_set_screen_size(conn, screen, (target_width, current_height))?;
+            self.randr_set_screen_size((target_width, current_height))?;
         }
 
         // SetCrtcConfig only works if the target output size fits into the current screen size. We
-        // can't use it directly when going from 200x300 to 300x200 because the size grows in width.
+        // can't use it directly when going from 200x300 to 300x200 because the width grows.
         if target_width < current_width || target_height < current_height {
-            let target_mode_opt = screen_resources
-                .modes()
-                .iter()
-                .find(|m| m.width == target_width && m.height == target_height);
-
-            let mode = match target_mode_opt {
-                Some(target_mode) => {
-                    let target_mode_id = target_mode.id;
-                    let cookie = conn.send_request(&randr::GetOutputInfo {
-                        output,
-                        config_timestamp: x::CURRENT_TIME,
-                    });
-                    let output_info = conn.wait_for_reply(cookie)?;
-
-                    let mode = *output_info
-                        .modes()
-                        .iter()
-                        .find(|m| m.resource_id() == target_mode_id)
-                        .expect("no matching mode on output");
-                    mode
-                }
-                None => {
-                    let id = conn.generate_id::<randr::Mode>().resource_id();
-                    let name_len =
-                        target_width.to_string().len() + target_height.to_string().len() + 1;
-                    let name = format!("{}x{}", target_width, target_height);
-                    println!(
-                        "new mode, id: {:?}, name_len: {}, name: {}",
-                        id, name_len, name
-                    );
-                    // Values reverse engineered from GetScreenResources output and existing modes
-                    let cookie = conn.send_request(&randr::CreateMode {
-                        window: screen.root(),
-                        mode_info: randr::ModeInfo {
-                            id,
-                            width: target_width,
-                            height: target_height,
-                            name_len: name_len as u16,
-                            dot_clock: 60 * target_width as u32 * target_height as u32, // 60 fps
-                            hsync_start: 0,
-                            hsync_end: 0,
-                            htotal: target_width,
-                            hskew: 0,
-                            vsync_start: 0,
-                            vsync_end: 0,
-                            vtotal: target_height,
-                            mode_flags: randr::ModeFlag::empty(),
-                        },
-                        name: name.as_bytes(),
-                    });
-                    let create_mode_resp = conn.wait_for_reply(cookie)?;
-                    let mode = create_mode_resp.mode();
-
-                    conn.send_and_check_request(&randr::AddOutputMode { output, mode })?;
-
-                    mode
-                }
-            };
-
-            let cookie = conn.send_request(&randr::SetCrtcConfig {
-                crtc,
-                timestamp: x::CURRENT_TIME,
-                config_timestamp: x::CURRENT_TIME,
-                x: crtc_info.x(),
-                y: crtc_info.y(),
-                mode,
-                rotation: crtc_info.rotation(),
-                outputs: &[output],
-            });
-            let _ = conn.wait_for_reply(cookie)?;
+            self.randr_set_output_size((target_width, target_height))?;
         }
 
-        // SetScreenSize only works if the output size (mode from SetCrtcConfig) fits into the target
-        // screen size. To achieve that, we shrink the output first.
-        //
-        // Increasing the screen size automatically increases the output size too.
-        // randr_set_screen_size(conn, screen, (target_width, target_height))?;
+        // SetScreenSize only works if the output size (mode from SetCrtcConfig) fits into the
+        // target screen size. To achieve that, we shrink the output first.
+        self.randr_set_screen_size((target_width, target_height))?;
+        // Updating output size accordlingly, so that GetCrtcInfo returns the correct size
+        self.randr_set_output_size((target_width, target_height))?;
+
+        self.screen_width = target_width;
+        self.screen_height = target_height;
+
+        Ok(())
+    }
+
+    fn randr_set_screen_size(&self, (width, height): (u16, u16)) -> xcb::Result<()> {
+        self.conn.send_and_check_request(&randr::SetScreenSize {
+            window: self.screen.root(),
+            width,
+            height,
+            // These two don't really matter for displays without a physical monitor
+            mm_width: 200,
+            mm_height: 200,
+        })?;
+        Ok(())
+    }
+
+    fn randr_set_output_size(&self, (width, height): (u16, u16)) -> xcb::Result<()> {
+        let cookie = self.conn.send_request(&randr::GetScreenResources {
+            window: self.screen.root(),
+        });
+        let screen_resources = self.conn.wait_for_reply(cookie)?;
+        let output = screen_resources.outputs()[0];
+        let crtc = screen_resources.crtcs()[0];
+
+        let target_mode_opt = screen_resources
+            .modes()
+            .iter()
+            .find(|m| m.width == width && m.height == height);
+
+        let mode = match target_mode_opt {
+            Some(target_mode) => {
+                let target_mode_id = target_mode.id;
+                let cookie = self.conn.send_request(&randr::GetOutputInfo {
+                    output,
+                    config_timestamp: x::CURRENT_TIME,
+                });
+                let output_info = self.conn.wait_for_reply(cookie)?;
+
+                let mode = *output_info
+                    .modes()
+                    .iter()
+                    .find(|m| m.resource_id() == target_mode_id)
+                    .expect("no matching mode on output");
+                mode
+            }
+            None => {
+                let id = self.conn.generate_id::<randr::Mode>().resource_id();
+                let name_len = width.to_string().len() + height.to_string().len() + 1;
+                let name = format!("{}x{}", width, height);
+                debug!(
+                    "new mode, id: {:?}, name_len: {}, name: {}",
+                    id, name_len, name
+                );
+                // Values reverse engineered from GetScreenResources output and existing modes
+                let cookie = self.conn.send_request(&randr::CreateMode {
+                    window: self.screen.root(),
+                    mode_info: randr::ModeInfo {
+                        id,
+                        width,
+                        height,
+                        name_len: name_len as u16,
+                        dot_clock: 60 * width as u32 * height as u32, // 60 fps
+                        hsync_start: 0,
+                        hsync_end: 0,
+                        htotal: width,
+                        hskew: 0,
+                        vsync_start: 0,
+                        vsync_end: 0,
+                        vtotal: height,
+                        mode_flags: randr::ModeFlag::empty(),
+                    },
+                    name: name.as_bytes(),
+                });
+                let create_mode_resp = self.conn.wait_for_reply(cookie)?;
+                let mode = create_mode_resp.mode();
+
+                self.conn
+                    .send_and_check_request(&randr::AddOutputMode { output, mode })?;
+
+                mode
+            }
+        };
+
+        let cookie = self.conn.send_request(&randr::SetCrtcConfig {
+            crtc,
+            timestamp: x::CURRENT_TIME,
+            config_timestamp: x::CURRENT_TIME,
+            x: 0,
+            y: 0,
+            mode,
+            rotation: randr::Rotation::ROTATE_0,
+            outputs: &[output],
+        });
+        let _ = self.conn.wait_for_reply(cookie)?;
 
         Ok(())
     }

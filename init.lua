@@ -1,4 +1,4 @@
 -- load plugins here
-require("xclock").setup()
+require("xapps").setup()
 require("cvh_camera").setup({ cameras = 2 })
 require("output").setup()
