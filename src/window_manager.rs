@@ -384,16 +384,12 @@ impl WindowManager {
         id: ManagedWid,
         (width, height): (u16, u16),
     ) -> anyhow::Result<()> {
-        let was_hidden;
-        match self.managed_windows.get_mut(&id) {
-            Some(window) => {
-                was_hidden = window.mode == Mode::Hidden;
-                window.mode = Mode::Max { width, height };
-            }
-            None => {
-                anyhow::bail!("there is no managed window for the managed wid {}", id);
-            }
-        };
+        self.ensure_managed(id)?;
+
+        let window = self.managed_windows.get_mut(&id).unwrap();
+        let was_hidden = window.mode == Mode::Hidden;
+        window.mode = Mode::Max { width, height };
+        drop(window);
 
         if was_hidden {
             let window = self.managed_windows.get(&id).unwrap();
@@ -407,16 +403,11 @@ impl WindowManager {
     }
 
     pub fn min_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
-        let was_hidden;
-        match self.managed_windows.get_mut(&id) {
-            Some(window) => {
-                was_hidden = window.mode == Mode::Hidden;
-                window.mode = Mode::Min;
-            }
-            None => {
-                anyhow::bail!("there is no managed window for the managed wid {}", id);
-            }
-        };
+        self.ensure_managed(id)?;
+
+        let window = self.managed_windows.get_mut(&id).unwrap();
+        let was_hidden = window.mode == Mode::Hidden;
+        window.mode = Mode::Min;
 
         if self.primary_window == Some(id) {
             debug!("primary window set to min, finding new primary window");
@@ -438,16 +429,12 @@ impl WindowManager {
     }
 
     pub fn hide_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
-        let was_shown;
-        match self.managed_windows.get_mut(&id) {
-            Some(window) => {
-                was_shown = window.mode != Mode::Hidden;
-                window.mode = Mode::Hidden;
-            }
-            None => {
-                anyhow::bail!("there is no managed window for the managed wid {}", id);
-            }
-        }
+        self.ensure_managed(id)?;
+
+        let window =  self.managed_windows.get_mut(&id).unwrap();
+        let was_shown = window.mode != Mode::Hidden;
+        window.mode = Mode::Hidden;
+        drop(window);
 
         if was_shown {
             let window = self.managed_windows.get(&id).unwrap();
@@ -465,6 +452,14 @@ impl WindowManager {
         }
 
         Ok(())
+    }
+
+    fn ensure_managed(&self, id: ManagedWid) -> anyhow::Result<()> {
+        if self.managed_windows.contains_key(&id) {
+            Ok(())
+        } else {
+            anyhow::bail!("there is no managed window for the managed wid {}", id)
+        }
     }
 
     fn map_window(&self, window: &ManagedWindow) -> xcb::Result<()> {
