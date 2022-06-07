@@ -171,8 +171,10 @@ impl PluginInstanceHandle {
                             return lua.pack(window_handle);
                         }
                         Err(e) => {
-                            self.plugin_instance
-                                .error(format!("Couldn't manage window with class {}: {}", class, e));
+                            self.plugin_instance.error(format!(
+                                "Couldn't manage window with class {}: {}",
+                                class, e
+                            ));
                         }
                     }
                 }
@@ -371,12 +373,24 @@ impl WindowHandle {
         }
         Ok(())
     }
+
+    fn hide(&self, lua: &Lua) -> mlua::Result<()> {
+        self.plugin_instance
+            .debug(format!("hiding window with managed wid {}", self.id));
+        let mut wm = self.ctx.window_manager.write().unwrap();
+        if let Err(e) = wm.hide_window(lua, self.id) {
+            self.plugin_instance
+                .error(format!("error hiding window: {}", e));
+        }
+        Ok(())
+    }
 }
 
 impl UserData for WindowHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("max", |lua, this, size| this.max(lua, size));
         methods.add_method("min", |lua, this, ()| this.min(lua));
+        methods.add_method("hide", |lua, this, ()| this.hide(lua));
     }
 }
 

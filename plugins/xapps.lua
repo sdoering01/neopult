@@ -36,6 +36,10 @@ M.setup = function()
                 xclock_module_handle:info("min action called")
                 xclock_handle:min()
             end)
+            xclock_module_handle:register_action("hide", function()
+                xclock_module_handle:info("hide action called")
+                xclock_handle:hide()
+            end)
         end
 
         if xterm_module_handle and xterm_handle then
@@ -47,6 +51,10 @@ M.setup = function()
                 xterm_module_handle:info("min action called")
                 xterm_handle:min()
             end)
+            xterm_module_handle:register_action("hide", function()
+                xterm_module_handle:info("hide action called")
+                xterm_handle:hide()
+            end)
         end
 
         if alacritty_module_handle and alacritty_handle then
@@ -57,6 +65,10 @@ M.setup = function()
             alacritty_module_handle:register_action("min", function()
                 alacritty_module_handle:info("min action called")
                 alacritty_handle:min()
+            end)
+            alacritty_module_handle:register_action("hide", function()
+                alacritty_module_handle:info("hide action called")
+                alacritty_handle:hide()
             end)
         end
     end

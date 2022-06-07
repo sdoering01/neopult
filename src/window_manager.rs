@@ -23,6 +23,7 @@ pub struct ManagedWindow {
 pub enum Mode {
     Max { width: u16, height: u16 },
     Min,
+    Hidden,
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -383,14 +384,21 @@ impl WindowManager {
         id: ManagedWid,
         (width, height): (u16, u16),
     ) -> anyhow::Result<()> {
+        let was_hidden;
         match self.managed_windows.get_mut(&id) {
             Some(window) => {
+                was_hidden = window.mode == Mode::Hidden;
                 window.mode = Mode::Max { width, height };
             }
             None => {
                 anyhow::bail!("there is no managed window for the managed wid {}", id);
             }
         };
+
+        if was_hidden {
+            let window = self.managed_windows.get(&id).unwrap();
+            self.map_window(window)?;
+        }
 
         self.primary_window = Some(id);
         self.reposition_windows(lua)?;
@@ -399,8 +407,10 @@ impl WindowManager {
     }
 
     pub fn min_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
+        let was_hidden;
         match self.managed_windows.get_mut(&id) {
             Some(window) => {
+                was_hidden = window.mode == Mode::Hidden;
                 window.mode = Mode::Min;
             }
             None => {
@@ -419,8 +429,64 @@ impl WindowManager {
         }
 
         let window = self.managed_windows.get(&id).unwrap();
+        if was_hidden {
+            self.map_window(window)?;
+        }
         self.change_window_geometry(window, window.min_geometry.get_geometry(self, lua))?;
 
+        Ok(())
+    }
+
+    pub fn hide_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
+        let was_shown;
+        match self.managed_windows.get_mut(&id) {
+            Some(window) => {
+                was_shown = window.mode != Mode::Hidden;
+                window.mode = Mode::Hidden;
+            }
+            None => {
+                anyhow::bail!("there is no managed window for the managed wid {}", id);
+            }
+        }
+
+        if was_shown {
+            let window = self.managed_windows.get(&id).unwrap();
+            self.unmap_window(window)?;
+
+            if self.primary_window == Some(id) {
+                debug!("primary window hidden, finding new primary window");
+                self.primary_window = self.find_new_primary_window();
+                match self.primary_window {
+                    Some(wid) => debug!("found new primary window with managed wid {}", wid),
+                    None => debug!("didn't find new primary window"),
+                }
+                self.reposition_windows(lua)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn map_window(&self, window: &ManagedWindow) -> xcb::Result<()> {
+        match window.variant {
+            WindowVariant::XWindow { window } => {
+                self.conn.send_and_check_request(&x::MapWindow { window })?;
+            }
+            // TODO: Implement for virtual window
+            WindowVariant::VirtualWindow => todo!(),
+        }
+        Ok(())
+    }
+
+    fn unmap_window(&self, window: &ManagedWindow) -> xcb::Result<()> {
+        match window.variant {
+            WindowVariant::XWindow { window } => {
+                self.conn
+                    .send_and_check_request(&x::UnmapWindow { window })?;
+            }
+            // TODO: Implement for virtual window
+            WindowVariant::VirtualWindow => todo!(),
+        }
         Ok(())
     }
 
@@ -438,7 +504,7 @@ impl WindowManager {
                     )?;
                     self.change_screen_resolution((width, height))?;
                 }
-                Mode::Min => {
+                Mode::Min | Mode::Hidden => {
                     anyhow::bail!("primary window isn't in max mode");
                 }
             }
