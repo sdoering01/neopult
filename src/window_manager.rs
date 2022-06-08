@@ -454,6 +454,27 @@ impl WindowManager {
         Ok(())
     }
 
+    pub fn release_window(
+        &mut self,
+        lua: &Lua,
+        id: ManagedWid,
+    ) -> anyhow::Result<()> {
+        self.ensure_managed(id)?;
+
+        let window = self.managed_windows.remove(&id).unwrap();
+        if self.primary_window == Some(window.id) {
+            debug!("primary window released, finding new primary window");
+            self.primary_window = self.find_new_primary_window();
+            match self.primary_window {
+                Some(wid) => debug!("found new primary window with managed wid {}", wid),
+                None => debug!("didn't find new primary window"),
+            }
+            self.reposition_windows(lua)?;
+        }
+
+        Ok(())
+    }
+
     fn ensure_managed(&self, id: ManagedWid) -> anyhow::Result<()> {
         if self.managed_windows.contains_key(&id) {
             Ok(())

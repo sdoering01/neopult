@@ -240,7 +240,7 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                             let _ = reply_sender.send("action called successfully".to_string());
                         }
                         Err(e) => {
-                            let _ = reply_sender.send(format!("error when calling action: {}", e));
+                            let _ = reply_sender.send(format!("error when calling action: {:?}", e));
                         }
                     }
                 } else {

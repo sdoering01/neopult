@@ -78,7 +78,7 @@ impl PluginInstanceHandle {
         if let Some(key) = on_output_key {
             let stdout = child.stdout.take().unwrap();
             let event_sender = self.ctx.event_sender.clone();
-            let process_name = cmd;
+            let process_name = cmd.clone();
             let plugin_instance = self.plugin_instance.clone();
             let callback_key = Arc::new(key);
             let pid = child.id();
@@ -112,7 +112,11 @@ impl PluginInstanceHandle {
             });
         }
 
-        let process_handle = ProcessHandle { child };
+        let process_handle = ProcessHandle {
+            cmd,
+            child,
+            plugin_instance: self.plugin_instance.clone(),
+        };
 
         lua.pack(process_handle)
     }
@@ -285,6 +289,8 @@ impl UserData for ModuleHandle {
 
 struct ProcessHandle {
     child: Child,
+    cmd: String,
+    plugin_instance: Arc<PluginInstance>,
 }
 
 impl ProcessHandle {
@@ -300,12 +306,25 @@ impl ProcessHandle {
     fn writeln(&self, lua: &Lua, line: String) -> mlua::Result<()> {
         self.write(lua, line + "\n")
     }
+
+    fn kill(&mut self) -> mlua::Result<()> {
+        if let Err(e) = self.child.kill() {
+            self.plugin_instance.warn(format!(
+                "Tried to to kill process {} (PID {}) which is not running: {}",
+                self.cmd,
+                self.child.id(),
+                e
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl UserData for ProcessHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("write", |lua, this, buf| this.write(lua, buf));
         methods.add_method("writeln", |lua, this, line| this.writeln(lua, line));
+        methods.add_method_mut("kill", |_lua, this, ()| this.kill());
     }
 }
 
@@ -384,6 +403,17 @@ impl WindowHandle {
         }
         Ok(())
     }
+
+    fn unclaim(&self, lua: &Lua) -> mlua::Result<()> {
+        self.plugin_instance
+            .debug(format!("unclaiming window with managed wid {}", self.id));
+        let mut wm = self.ctx.window_manager.write().unwrap();
+        if let Err(e) = wm.release_window(lua, self.id) {
+            self.plugin_instance
+                .error(format!("error unclaiming window: {}", e));
+        }
+        Ok(())
+    }
 }
 
 impl UserData for WindowHandle {
@@ -391,6 +421,7 @@ impl UserData for WindowHandle {
         methods.add_method("max", |lua, this, size| this.max(lua, size));
         methods.add_method("min", |lua, this, ()| this.min(lua));
         methods.add_method("hide", |lua, this, ()| this.hide(lua));
+        methods.add_method("unclaim", |lua, this, ()| this.unclaim(lua));
     }
 }
 
