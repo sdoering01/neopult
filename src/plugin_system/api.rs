@@ -49,20 +49,42 @@ impl PluginInstanceHandle {
         lua: &'lua Lua,
         (cmd, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
+        let mut args = Vec::<String>::new();
+        if let Value::Table(ref opts_table) = opts {
+            if let Ok(args_table) = opts_table.get::<_, Table>("args") {
+                args = args_table
+                    .pairs::<Value, String>()
+                    .flatten()
+                    .map(|(_idx, arg)| arg)
+                    .collect();
+            }
+        }
+
+        let (output_reader, output_writer) = os_pipe::pipe()?;
+        let output_writer_clone = output_writer.try_clone()?;
+
         let child_result = Command::new(cmd.clone())
+            .args(&args)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .stdout(output_writer)
+            .stderr(output_writer_clone)
             .spawn();
 
-        let mut child = match child_result {
+        let child = match child_result {
             Err(e) => {
-                self.plugin_instance
-                    .error(format!("couldn't spawn process {}: {}", cmd, e));
+                self.plugin_instance.error(format!(
+                    "couldn't spawn process {} with args {:?}: {}",
+                    cmd, args, e
+                ));
                 return Ok(Value::Nil);
             }
             Ok(c) => {
-                self.plugin_instance
-                    .debug(format!("spawned process {} (PID {})", cmd, c.id()));
+                self.plugin_instance.debug(format!(
+                    "spawned process {} with args {:?} (PID {})",
+                    cmd,
+                    args,
+                    c.id()
+                ));
                 c
             }
         };
@@ -76,14 +98,13 @@ impl PluginInstanceHandle {
         }
 
         if let Some(key) = on_output_key {
-            let stdout = child.stdout.take().unwrap();
             let event_sender = self.ctx.event_sender.clone();
             let process_name = cmd.clone();
             let plugin_instance = self.plugin_instance.clone();
             let callback_key = Arc::new(key);
             let pid = child.id();
             thread::spawn(move || {
-                let reader = BufReader::new(stdout);
+                let reader = BufReader::new(output_reader);
                 for line_result in reader.lines() {
                     match line_result {
                         Ok(line) => {
@@ -109,6 +130,10 @@ impl PluginInstanceHandle {
                         }
                     }
                 }
+                plugin_instance.debug(format!(
+                    "stdout and stderr for process {} (PID {}) closed",
+                    process_name, pid
+                ));
             });
         }
 
