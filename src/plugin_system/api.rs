@@ -50,7 +50,12 @@ impl PluginInstanceHandle {
         (cmd, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
         let mut args = Vec::<String>::new();
+        let mut on_output_key = None;
+
         if let Value::Table(ref opts_table) = opts {
+            if let Ok(on_output) = opts_table.get::<_, Function>("on_output") {
+                on_output_key = Some(lua.create_registry_value(on_output)?);
+            }
             if let Ok(args_table) = opts_table.get::<_, Table>("args") {
                 args = args_table
                     .pairs::<Value, String>()
@@ -60,17 +65,20 @@ impl PluginInstanceHandle {
             }
         }
 
-        let (output_reader, output_writer) = os_pipe::pipe()?;
-        let output_writer_clone = output_writer.try_clone()?;
+        let mut command = Command::new(&cmd);
+        command.args(&args).stdin(Stdio::piped());
 
-        let child_result = Command::new(cmd.clone())
-            .args(&args)
-            .stdin(Stdio::piped())
-            .stdout(output_writer)
-            .stderr(output_writer_clone)
-            .spawn();
+        let mut output_reader = None;
+        if on_output_key.is_some() {
+            let (reader, writer) = os_pipe::pipe()?;
+            let writer_clone = writer.try_clone()?;
+            command.stdout(writer).stderr(writer_clone);
+            output_reader = Some(reader);
+        } else {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
 
-        let child = match child_result {
+        let child = match command.spawn() {
             Err(e) => {
                 self.plugin_instance.error(format!(
                     "couldn't spawn process {} with args {:?}: {}",
@@ -89,14 +97,6 @@ impl PluginInstanceHandle {
             }
         };
 
-        let mut on_output_key = None;
-
-        if let Value::Table(opts_table) = opts {
-            if let Ok(on_output) = opts_table.get::<_, Function>("on_output") {
-                on_output_key = Some(lua.create_registry_value(on_output)?);
-            }
-        }
-
         if let Some(key) = on_output_key {
             let event_sender = self.ctx.event_sender.clone();
             let process_name = cmd.clone();
@@ -104,7 +104,9 @@ impl PluginInstanceHandle {
             let callback_key = Arc::new(key);
             let pid = child.id();
             thread::spawn(move || {
-                let reader = BufReader::new(output_reader);
+                // We can unwrap output_reader, since we only reach this code, when on_output_key
+                // is Some.
+                let reader = BufReader::new(output_reader.unwrap());
                 for line_result in reader.lines() {
                     match line_result {
                         Ok(line) => {
