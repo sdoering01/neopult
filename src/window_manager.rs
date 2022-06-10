@@ -34,17 +34,6 @@ struct Geometry {
     height: u16,
 }
 
-impl Geometry {
-    fn from_width_height(width: u16, height: u16) -> Self {
-        Geometry {
-            x: 0,
-            y: 0,
-            width,
-            height,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Alignment {
     TopLeft,
@@ -120,6 +109,16 @@ impl FromStr for AlignedGeometry {
 }
 
 impl AlignedGeometry {
+    fn from_width_height(width: u16, height: u16) -> Self {
+        AlignedGeometry {
+            x_offset: 0,
+            y_offset: 0,
+            width,
+            height,
+            alignment: Alignment::TopLeft,
+        }
+    }
+
     fn into_geometry(&self, wm: &WindowManager) -> Geometry {
         let (x, y) = match self.alignment {
             Alignment::TopLeft => (self.x_offset, self.y_offset),
@@ -170,9 +169,9 @@ impl FromStr for MinGeometry {
 }
 
 impl MinGeometry {
-    fn get_geometry(&self, wm: &WindowManager, _lua: &Lua) -> Geometry {
+    fn get_geometry(&self, _lua: &Lua) -> AlignedGeometry {
         match self {
-            MinGeometry::Fixed(aligned_geometry) => aligned_geometry.into_geometry(wm),
+            MinGeometry::Fixed(aligned_geometry) => *aligned_geometry,
             // TODO: Call lua function to get geometry
             MinGeometry::Dynamic { callback_key: _ } => todo!(),
         }
@@ -369,7 +368,7 @@ impl WindowManager {
             mode: Mode::Min,
         };
 
-        let geometry = managed_window.min_geometry.get_geometry(self, lua);
+        let geometry = managed_window.min_geometry.get_geometry(lua);
         self.change_window_geometry(&managed_window, geometry)?;
 
         self.managed_windows.insert(id, managed_window);
@@ -423,7 +422,7 @@ impl WindowManager {
         if was_hidden {
             self.map_window(window)?;
         }
-        self.change_window_geometry(window, window.min_geometry.get_geometry(self, lua))?;
+        self.change_window_geometry(window, window.min_geometry.get_geometry(lua))?;
 
         Ok(())
     }
@@ -431,7 +430,7 @@ impl WindowManager {
     pub fn hide_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
         self.ensure_managed(id)?;
 
-        let window =  self.managed_windows.get_mut(&id).unwrap();
+        let window = self.managed_windows.get_mut(&id).unwrap();
         let was_shown = window.mode != Mode::Hidden;
         window.mode = Mode::Hidden;
         drop(window);
@@ -454,11 +453,7 @@ impl WindowManager {
         Ok(())
     }
 
-    pub fn release_window(
-        &mut self,
-        lua: &Lua,
-        id: ManagedWid,
-    ) -> anyhow::Result<()> {
+    pub fn release_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
         self.ensure_managed(id)?;
 
         let window = self.managed_windows.remove(&id).unwrap();
@@ -516,7 +511,7 @@ impl WindowManager {
                 Mode::Max { width, height } => {
                     self.change_window_geometry(
                         primary_window,
-                        Geometry::from_width_height(width, height),
+                        AlignedGeometry::from_width_height(width, height),
                     )?;
                     self.change_screen_resolution((width, height))?;
                 }
@@ -529,7 +524,7 @@ impl WindowManager {
         // TODO: Define some kind of z-order to handle overlapping min windows
         for window in self.managed_windows.values() {
             if window.mode == Mode::Min {
-                self.change_window_geometry(window, window.min_geometry.get_geometry(self, lua))?;
+                self.change_window_geometry(window, window.min_geometry.get_geometry(lua))?;
             }
         }
 
@@ -548,10 +543,11 @@ impl WindowManager {
     fn change_window_geometry(
         &self,
         managed_window: &ManagedWindow,
-        geometry: Geometry,
+        aligned_geometry: AlignedGeometry,
     ) -> xcb::Result<()> {
         match managed_window.variant {
             WindowVariant::XWindow { window } => {
+                let geometry = aligned_geometry.into_geometry(self);
                 self.conn.send_and_check_request(&x::ConfigureWindow {
                     window,
                     value_list: &[
