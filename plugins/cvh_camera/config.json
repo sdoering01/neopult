@@ -1,0 +1,11 @@
+{
+  "port": 5000,
+  "cameraSlots": 4,
+  "notifyPath": "../../camera-server-output",
+  "janusURL": "http://localhost:8088/janus",
+  "janusRoom": 1000,
+  "janusRoomSecret": "default",
+  "janusRoomPin": "testcvh",
+  "janusBitrate": 128000,
+  "janusAdminKey": "default"
+}
