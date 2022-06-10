@@ -4,6 +4,7 @@ use crate::plugin_system::{
 use crate::window_manager::{ManagedWid, MinGeometry};
 use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
+use std::collections::HashMap;
 use std::io::{prelude::*, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -50,6 +51,7 @@ impl PluginInstanceHandle {
         (cmd, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
         let mut args = Vec::<String>::new();
+        let mut envs = HashMap::<String, String>::new();
         let mut on_output_key = None;
 
         if let Value::Table(ref opts_table) = opts {
@@ -63,10 +65,13 @@ impl PluginInstanceHandle {
                     .map(|(_idx, arg)| arg)
                     .collect();
             }
+            if let Ok(env_table) = opts_table.get::<_, Table>("envs") {
+                envs = env_table.pairs::<String, String>().flatten().collect();
+            }
         }
 
         let mut command = Command::new(&cmd);
-        command.args(&args).stdin(Stdio::piped());
+        command.args(&args).envs(&envs).stdin(Stdio::piped());
 
         let mut output_reader = None;
         if on_output_key.is_some() {
@@ -81,16 +86,17 @@ impl PluginInstanceHandle {
         let child = match command.spawn() {
             Err(e) => {
                 self.plugin_instance.error(format!(
-                    "couldn't spawn process {} with args {:?}: {}",
-                    cmd, args, e
+                    "couldn't spawn process {} with args {:?} and envs {:?}: {}",
+                    cmd, args, envs, e
                 ));
                 return Ok(Value::Nil);
             }
             Ok(c) => {
                 self.plugin_instance.debug(format!(
-                    "spawned process {} with args {:?} (PID {})",
+                    "spawned process {} with args {:?} and envs {:?} (PID {})",
                     cmd,
                     args,
+                    envs,
                     c.id()
                 ));
                 c
