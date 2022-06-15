@@ -9,6 +9,9 @@ use xcb::{randr, x, Connection, Xid};
 
 const MANAGED_HINT: &str = "MANAGED";
 
+const MIN_Z: u16 = 1;
+const MAX_Z: u16 = 0;
+
 pub type ManagedWid = usize;
 
 #[derive(Debug)]
@@ -393,7 +396,7 @@ impl WindowManager {
         };
 
         let geometry = managed_window.min_geometry.get_geometry(lua);
-        self.change_window_geometry(lua, &managed_window, geometry)?;
+        self.change_window_geometry(lua, &managed_window, geometry, MIN_Z)?;
 
         self.managed_windows.insert(id, managed_window);
         self.current_id += 1;
@@ -417,7 +420,7 @@ impl WindowManager {
         };
 
         let geometry = managed_window.min_geometry.get_geometry(lua);
-        self.change_window_geometry(lua, &managed_window, geometry)?;
+        self.change_window_geometry(lua, &managed_window, geometry, MIN_Z)?;
 
         self.managed_windows.insert(id, managed_window);
         self.current_id += 1;
@@ -470,7 +473,7 @@ impl WindowManager {
         if was_hidden {
             self.map_window(lua, window)?;
         }
-        self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua))?;
+        self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua), MIN_Z)?;
 
         Ok(())
     }
@@ -598,6 +601,7 @@ impl WindowManager {
                         lua,
                         primary_window,
                         AlignedGeometry::from_width_height(width, height),
+                        MAX_Z,
                     )?;
                     self.change_screen_resolution((width, height))?;
                 }
@@ -610,7 +614,7 @@ impl WindowManager {
         // TODO: Define some kind of z-order to handle overlapping min windows
         for window in self.managed_windows.values() {
             if window.mode == Mode::Min {
-                self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua))?;
+                self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua), MIN_Z)?;
             }
         }
 
@@ -631,6 +635,7 @@ impl WindowManager {
         lua: &Lua,
         managed_window: &ManagedWindow,
         aligned_geometry: AlignedGeometry,
+        z: u16,
     ) -> xcb::Result<()> {
         match &managed_window.variant {
             WindowVariant::XWindow { window } => {
@@ -657,6 +662,7 @@ impl WindowManager {
                             aligned_geometry.width,
                             aligned_geometry.height,
                             aligned_geometry.alignment.to_string(),
+                            z,
                         )) {
                             error!(
                                 "error when calling set geometry callback on virtual window with \

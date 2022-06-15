@@ -11,6 +11,8 @@ M.camera_modules = {}
 M.slot_active_states = {}
 M.camera_handles = {}
 
+M.max_camera_handle = nil
+
 local function handle_output(line)
     M.plugin_handle:info("camera server output line " .. line)
 end
@@ -29,8 +31,8 @@ local function handle_notify(line)
         local slot = tonumber(slot_str)
         M.slot_active_states[slot + 1] = true
         M.camera_handles[slot + 1] = M.plugin_handle:create_virtual_window("camera-" .. (slot + 1), {
-            set_geometry = function(x_offset, y_offset, width, height, alignment)
-                M.camera_server_handle:writeln("set_geometry_relative_to_canvas " .. slot ..  " " .. alignment .. " " .. x_offset .. " " .. y_offset .. " " .. width .. " " .. height)
+            set_geometry = function(x_offset, y_offset, width, height, alignment, z)
+                M.camera_server_handle:writeln("set_geometry_relative_to_canvas " .. slot ..  " " .. alignment .. " " .. x_offset .. " " .. y_offset .. " " .. width .. " " .. height .. " " .. z)
             end,
             map = function()
                 M.camera_server_handle:writeln("show " .. slot)
@@ -46,6 +48,9 @@ local function handle_notify(line)
         local slot = tonumber(slot_str)
         M.slot_active_states[slot + 1] = false
         M.camera_handles[slot + 1]:unclaim()
+        if M.max_camera_handle == M.camera_handles[slot + 1] then
+            M.max_camera_handle = nil
+        end
         M.camera_handles[slot + 1] = nil
         M.plugin_handle:info("removed feed on slot " .. slot)
     elseif type == "custom_name" then
@@ -107,7 +112,11 @@ M.setup = function(args)
             module_handle:register_action("max", function()
                 module_handle:info("max action")
                 if M.camera_handles[camera] then
+                    if M.max_camera_handle then
+                        M.max_camera_handle:min()
+                    end
                     M.camera_handles[camera]:max({ 1200, 900 })
+                    M.max_camera_handle = M.camera_handles[camera]
                 end
             end)
             module_handle:register_action("min", function()
