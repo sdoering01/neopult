@@ -67,19 +67,19 @@ M.setup = function()
             end)
             module_handle:register_action("max", function()
                 module_handle:info("max action called")
-                if M.state ~= INACTIVE then
+                if M.state == ACTIVE then
                     M.window_handle:max({ 1920, 1080 })
                 end
             end)
             module_handle:register_action("min", function()
                 module_handle:info("min action called")
-                if M.state ~= INACTIVE then
+                if M.state == ACTIVE then
                     M.window_handle:min()
                 end
             end)
             module_handle:register_action("hide", function()
                 module_handle:info("hide action called")
-                if M.state ~= INACTIVE then
+                if M.state == ACTIVE then
                     M.window_handle:hide()
                 end
             end)
