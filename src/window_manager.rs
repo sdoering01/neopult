@@ -200,6 +200,32 @@ pub struct VirtualWindowCallbacks {
     pub unmap_key: RegistryKey,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PrimaryDemotionAction {
+    DoNothing,
+    MakeMin,
+    Hide,
+}
+
+impl Default for PrimaryDemotionAction {
+    fn default() -> Self {
+        Self::DoNothing
+    }
+}
+
+impl FromStr for PrimaryDemotionAction {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "do_nothing" => Ok(Self::DoNothing),
+            "make_min" => Ok(Self::MakeMin),
+            "hide" => Ok(Self::Hide),
+            _ => Err(anyhow::anyhow!("unknown primary demotion action")),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum WindowVariant {
     XWindow {
@@ -208,6 +234,7 @@ enum WindowVariant {
     VirtualWindow {
         name: String,
         callbacks: VirtualWindowCallbacks,
+        primary_demotion_action: PrimaryDemotionAction,
     },
 }
 
@@ -410,11 +437,16 @@ impl WindowManager {
         name: String,
         callbacks: VirtualWindowCallbacks,
         min_geometry: MinGeometry,
+        primary_demotion_action: PrimaryDemotionAction,
     ) -> anyhow::Result<ManagedWid> {
         let id = self.current_id;
         let managed_window = ManagedWindow {
             id,
-            variant: WindowVariant::VirtualWindow { name, callbacks },
+            variant: WindowVariant::VirtualWindow {
+                name,
+                callbacks,
+                primary_demotion_action,
+            },
             min_geometry,
             mode: Mode::Min,
         };
@@ -446,8 +478,35 @@ impl WindowManager {
             self.map_window(lua, window)?;
         }
 
+        let previous_primary_window = self.primary_window;
+
         self.primary_window = Some(id);
         self.reposition_windows(lua)?;
+
+        if let Some(wid) = previous_primary_window {
+            let window = self
+                .managed_windows
+                .get(&wid)
+                .expect("previous primary window is not managed");
+
+            if let WindowVariant::VirtualWindow {
+                primary_demotion_action,
+                ..
+            } = &window.variant
+            {
+                match primary_demotion_action {
+                    PrimaryDemotionAction::DoNothing => (),
+                    PrimaryDemotionAction::MakeMin => {
+                        let id = window.id;
+                        self.min_window(lua, id)?;
+                    }
+                    PrimaryDemotionAction::Hide => {
+                        let id = window.id;
+                        self.hide_window(lua, id)?;
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -535,26 +594,26 @@ impl WindowManager {
                 self.conn
                     .send_and_check_request(&x::MapWindow { window: *window })?;
             }
-            WindowVariant::VirtualWindow { name, callbacks } => {
-                match lua.registry_value::<Function>(&callbacks.map_key) {
-                    Ok(callback) => {
-                        if let Err(e) = callback.call::<_, Value>(()) {
-                            error!(
-                                "error when calling map callback on virtual window with \
-                                   name {} (managed wid {}): {}",
-                                name, window.id, e
-                            );
-                        }
-                    }
-                    Err(_) => {
+            WindowVariant::VirtualWindow {
+                name, callbacks, ..
+            } => match lua.registry_value::<Function>(&callbacks.map_key) {
+                Ok(callback) => {
+                    if let Err(e) = callback.call::<_, Value>(()) {
                         error!(
-                            "callback wasn't a function in lua registry when calling map \
-                               on virtual window with name {} (managed wid {})",
-                            name, window.id
+                            "error when calling map callback on virtual window with \
+                            name {} (managed wid {}): {}",
+                            name, window.id, e
                         );
                     }
                 }
-            }
+                Err(_) => {
+                    error!(
+                        "callback wasn't a function in lua registry when calling map \
+                        on virtual window with name {} (managed wid {})",
+                        name, window.id
+                    );
+                }
+            },
         }
         Ok(())
     }
@@ -565,26 +624,26 @@ impl WindowManager {
                 self.conn
                     .send_and_check_request(&x::UnmapWindow { window: *window })?;
             }
-            WindowVariant::VirtualWindow { name, callbacks } => {
-                match lua.registry_value::<Function>(&callbacks.unmap_key) {
-                    Ok(callback) => {
-                        if let Err(e) = callback.call::<_, Value>(()) {
-                            error!(
-                                "error when calling unmap callback on virtual window with \
-                                   name {} (managed wid {}): {}",
-                                name, window.id, e
-                            );
-                        }
-                    }
-                    Err(_) => {
+            WindowVariant::VirtualWindow {
+                name, callbacks, ..
+            } => match lua.registry_value::<Function>(&callbacks.unmap_key) {
+                Ok(callback) => {
+                    if let Err(e) = callback.call::<_, Value>(()) {
                         error!(
-                            "callback wasn't a function in lua registry when calling unmap \
-                               on virtual window with name {} (managed wid {})",
-                            name, window.id
+                            "error when calling unmap callback on virtual window with \
+                            name {} (managed wid {}): {}",
+                            name, window.id, e
                         );
                     }
                 }
-            }
+                Err(_) => {
+                    error!(
+                        "callback wasn't a function in lua registry when calling unmap \
+                        on virtual window with name {} (managed wid {})",
+                        name, window.id
+                    );
+                }
+            },
         }
         Ok(())
     }
@@ -614,7 +673,12 @@ impl WindowManager {
         // TODO: Define some kind of z-order to handle overlapping min windows
         for window in self.managed_windows.values() {
             if window.mode == Mode::Min {
-                self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua), MIN_Z)?;
+                self.change_window_geometry(
+                    lua,
+                    window,
+                    window.min_geometry.get_geometry(lua),
+                    MIN_Z,
+                )?;
             }
         }
 
@@ -653,33 +717,33 @@ impl WindowManager {
                 })?;
             }
             // TODO: Either implement 'raise' or z-order
-            WindowVariant::VirtualWindow { name, callbacks } => {
-                match lua.registry_value::<Function>(&callbacks.set_geometry_key) {
-                    Ok(callback) => {
-                        if let Err(e) = callback.call::<_, Value>((
-                            aligned_geometry.x_offset,
-                            aligned_geometry.y_offset,
-                            aligned_geometry.width,
-                            aligned_geometry.height,
-                            aligned_geometry.alignment.to_string(),
-                            z,
-                        )) {
-                            error!(
-                                "error when calling set geometry callback on virtual window with \
-                                   name {} (managed wid {}): {}",
-                                name, managed_window.id, e
-                            );
-                        }
-                    }
-                    Err(_) => {
+            WindowVariant::VirtualWindow {
+                name, callbacks, ..
+            } => match lua.registry_value::<Function>(&callbacks.set_geometry_key) {
+                Ok(callback) => {
+                    if let Err(e) = callback.call::<_, Value>((
+                        aligned_geometry.x_offset,
+                        aligned_geometry.y_offset,
+                        aligned_geometry.width,
+                        aligned_geometry.height,
+                        aligned_geometry.alignment.to_string(),
+                        z,
+                    )) {
                         error!(
-                            "callback wasn't a function in lua registry when calling set_geometry \
-                               on virtual window with name {} (managed wid {})",
-                            name, managed_window.id
+                            "error when calling set geometry callback on virtual window with \
+                            name {} (managed wid {}): {}",
+                            name, managed_window.id, e
                         );
                     }
                 }
-            }
+                Err(_) => {
+                    error!(
+                        "callback wasn't a function in lua registry when calling set_geometry \
+                        on virtual window with name {} (managed wid {})",
+                        name, managed_window.id
+                    );
+                }
+            },
         }
 
         Ok(())

@@ -1,7 +1,9 @@
 use crate::plugin_system::{
     create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, PluginInstance,
 };
-use crate::window_manager::{ManagedWid, MinGeometry, VirtualWindowCallbacks};
+use crate::window_manager::{
+    ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
+};
 use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
 use std::collections::HashMap;
@@ -285,11 +287,25 @@ impl PluginInstanceHandle {
                 Ok(parsed) => min_geometry = parsed,
                 Err(e) => {
                     self.plugin_instance.warn(format!(
-                        "error when creating virtual window with name {} (using default): {}",
+                        "could not parse min_geomety when creating virtual window with name {} (using default): {}",
                         name, e
                     ));
                 }
             };
+        }
+
+        let mut primary_demotion_action = PrimaryDemotionAction::default();
+        if let Ok(primary_demotion_action_str) = opts.get::<_, String>("primary_demotion_action") {
+            match primary_demotion_action_str.parse() {
+                Ok(parsed) => primary_demotion_action = parsed,
+                Err(e) => {
+                    self.plugin_instance.warn(format!(
+                        "could not parse primary_demotion_action when creating \
+                        window with name {} (using default): {}",
+                        name, e
+                    ));
+                }
+            }
         }
 
         let callbacks = VirtualWindowCallbacks {
@@ -299,7 +315,13 @@ impl PluginInstanceHandle {
         };
 
         let mut wm = self.ctx.window_manager.write().unwrap();
-        match wm.manage_virtual_window(lua, name.clone(), callbacks, min_geometry) {
+        match wm.manage_virtual_window(
+            lua,
+            name.clone(),
+            callbacks,
+            min_geometry,
+            primary_demotion_action,
+        ) {
             Ok(id) => {
                 let window_handle = WindowHandle {
                     id,
