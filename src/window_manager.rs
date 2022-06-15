@@ -1,6 +1,6 @@
 use anyhow::Context;
 use log::{debug, error, warn};
-use mlua::{Lua, RegistryKey};
+use mlua::{Function, Lua, RegistryKey, Value};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::{self, FromStr};
@@ -40,6 +40,18 @@ pub enum Alignment {
     TopRight,
     BottomRight,
     BottomLeft,
+}
+
+impl ToString for Alignment {
+    fn to_string(&self) -> String {
+        match self {
+            Alignment::TopLeft => "lt",
+            Alignment::TopRight => "rt",
+            Alignment::BottomRight => "rb",
+            Alignment::BottomLeft => "lb",
+        }
+        .to_string()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -179,9 +191,21 @@ impl MinGeometry {
 }
 
 #[derive(Debug)]
+pub struct VirtualWindowCallbacks {
+    pub set_geometry_key: RegistryKey,
+    pub map_key: RegistryKey,
+    pub unmap_key: RegistryKey,
+}
+
+#[derive(Debug)]
 enum WindowVariant {
-    XWindow { window: x::Window },
-    VirtualWindow,
+    XWindow {
+        window: x::Window,
+    },
+    VirtualWindow {
+        name: String,
+        callbacks: VirtualWindowCallbacks,
+    },
 }
 
 // NOTE: Remember to adjust Debug implementation when changing something here
@@ -369,7 +393,31 @@ impl WindowManager {
         };
 
         let geometry = managed_window.min_geometry.get_geometry(lua);
-        self.change_window_geometry(&managed_window, geometry)?;
+        self.change_window_geometry(lua, &managed_window, geometry)?;
+
+        self.managed_windows.insert(id, managed_window);
+        self.current_id += 1;
+
+        Ok(id)
+    }
+
+    pub fn manage_virtual_window(
+        &mut self,
+        lua: &Lua,
+        name: String,
+        callbacks: VirtualWindowCallbacks,
+        min_geometry: MinGeometry,
+    ) -> anyhow::Result<ManagedWid> {
+        let id = self.current_id;
+        let managed_window = ManagedWindow {
+            id,
+            variant: WindowVariant::VirtualWindow { name, callbacks },
+            min_geometry,
+            mode: Mode::Min,
+        };
+
+        let geometry = managed_window.min_geometry.get_geometry(lua);
+        self.change_window_geometry(lua, &managed_window, geometry)?;
 
         self.managed_windows.insert(id, managed_window);
         self.current_id += 1;
@@ -392,7 +440,7 @@ impl WindowManager {
 
         if was_hidden {
             let window = self.managed_windows.get(&id).unwrap();
-            self.map_window(window)?;
+            self.map_window(lua, window)?;
         }
 
         self.primary_window = Some(id);
@@ -420,9 +468,9 @@ impl WindowManager {
 
         let window = self.managed_windows.get(&id).unwrap();
         if was_hidden {
-            self.map_window(window)?;
+            self.map_window(lua, window)?;
         }
-        self.change_window_geometry(window, window.min_geometry.get_geometry(lua))?;
+        self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua))?;
 
         Ok(())
     }
@@ -437,7 +485,7 @@ impl WindowManager {
 
         if was_shown {
             let window = self.managed_windows.get(&id).unwrap();
-            self.unmap_window(window)?;
+            self.unmap_window(lua, window)?;
 
             if self.primary_window == Some(id) {
                 debug!("primary window hidden, finding new primary window");
@@ -478,25 +526,62 @@ impl WindowManager {
         }
     }
 
-    fn map_window(&self, window: &ManagedWindow) -> xcb::Result<()> {
-        match window.variant {
+    fn map_window(&self, lua: &Lua, window: &ManagedWindow) -> xcb::Result<()> {
+        match &window.variant {
             WindowVariant::XWindow { window } => {
-                self.conn.send_and_check_request(&x::MapWindow { window })?;
+                self.conn
+                    .send_and_check_request(&x::MapWindow { window: *window })?;
             }
-            // TODO: Implement for virtual window
-            WindowVariant::VirtualWindow => todo!(),
+            WindowVariant::VirtualWindow { name, callbacks } => {
+                match lua.registry_value::<Function>(&callbacks.map_key) {
+                    Ok(callback) => {
+                        if let Err(e) = callback.call::<_, Value>(()) {
+                            error!(
+                                "error when calling map callback on virtual window with \
+                                   name {} (managed wid {}): {}",
+                                name, window.id, e
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        error!(
+                            "callback wasn't a function in lua registry when calling map \
+                               on virtual window with name {} (managed wid {})",
+                            name, window.id
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }
 
-    fn unmap_window(&self, window: &ManagedWindow) -> xcb::Result<()> {
-        match window.variant {
+    fn unmap_window(&self, lua: &Lua, window: &ManagedWindow) -> xcb::Result<()> {
+        match &window.variant {
             WindowVariant::XWindow { window } => {
                 self.conn
-                    .send_and_check_request(&x::UnmapWindow { window })?;
+                    .send_and_check_request(&x::UnmapWindow { window: *window })?;
             }
-            // TODO: Implement for virtual window
-            WindowVariant::VirtualWindow => todo!(),
+            WindowVariant::VirtualWindow { name, callbacks } => {
+                match lua.registry_value::<Function>(&callbacks.unmap_key) {
+                    Ok(callback) => {
+                        if let Err(e) = callback.call::<_, Value>(()) {
+                            error!(
+                                "error when calling unmap callback on virtual window with \
+                                   name {} (managed wid {}): {}",
+                                name, window.id, e
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        error!(
+                            "callback wasn't a function in lua registry when calling unmap \
+                               on virtual window with name {} (managed wid {})",
+                            name, window.id
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -510,6 +595,7 @@ impl WindowManager {
             match primary_window.mode {
                 Mode::Max { width, height } => {
                     self.change_window_geometry(
+                        lua,
                         primary_window,
                         AlignedGeometry::from_width_height(width, height),
                     )?;
@@ -524,7 +610,7 @@ impl WindowManager {
         // TODO: Define some kind of z-order to handle overlapping min windows
         for window in self.managed_windows.values() {
             if window.mode == Mode::Min {
-                self.change_window_geometry(window, window.min_geometry.get_geometry(lua))?;
+                self.change_window_geometry(lua, window, window.min_geometry.get_geometry(lua))?;
             }
         }
 
@@ -542,14 +628,15 @@ impl WindowManager {
 
     fn change_window_geometry(
         &self,
+        lua: &Lua,
         managed_window: &ManagedWindow,
         aligned_geometry: AlignedGeometry,
     ) -> xcb::Result<()> {
-        match managed_window.variant {
+        match &managed_window.variant {
             WindowVariant::XWindow { window } => {
                 let geometry = aligned_geometry.into_geometry(self);
                 self.conn.send_and_check_request(&x::ConfigureWindow {
-                    window,
+                    window: *window,
                     value_list: &[
                         x::ConfigWindow::X(geometry.x as i32),
                         x::ConfigWindow::Y(geometry.y as i32),
@@ -560,8 +647,33 @@ impl WindowManager {
                     ],
                 })?;
             }
-            // TODO: Implement for virtual windows, remember to also raise the window
-            WindowVariant::VirtualWindow => todo!(),
+            // TODO: Either implement 'raise' or z-order
+            WindowVariant::VirtualWindow { name, callbacks } => {
+                match lua.registry_value::<Function>(&callbacks.set_geometry_key) {
+                    Ok(callback) => {
+                        if let Err(e) = callback.call::<_, Value>((
+                            aligned_geometry.x_offset,
+                            aligned_geometry.y_offset,
+                            aligned_geometry.width,
+                            aligned_geometry.height,
+                            aligned_geometry.alignment.to_string(),
+                        )) {
+                            error!(
+                                "error when calling set geometry callback on virtual window with \
+                                   name {} (managed wid {}): {}",
+                                name, managed_window.id, e
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        error!(
+                            "callback wasn't a function in lua registry when calling set_geometry \
+                               on virtual window with name {} (managed wid {})",
+                            name, managed_window.id
+                        );
+                    }
+                }
+            }
         }
 
         Ok(())

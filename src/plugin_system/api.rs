@@ -1,7 +1,7 @@
 use crate::plugin_system::{
     create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, PluginInstance,
 };
-use crate::window_manager::{ManagedWid, MinGeometry};
+use crate::window_manager::{ManagedWid, MinGeometry, VirtualWindowCallbacks};
 use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
 use std::collections::HashMap;
@@ -237,6 +237,86 @@ impl PluginInstanceHandle {
         ));
         Ok(Value::Nil)
     }
+
+    fn create_virtual_window<'lua>(
+        &self,
+        lua: &'lua Lua,
+        (name, opts): (String, Table),
+    ) -> mlua::Result<Value<'lua>> {
+        self.plugin_instance
+            .debug(format!("Creating virtual window with name {}", name));
+
+        let set_geometry_key = match opts.get::<_, Function>("set_geometry") {
+            Ok(cb) => lua.create_registry_value(cb)?,
+            Err(_) => {
+                self.plugin_instance.error(format!(
+                    "error when creating virtual window with name {} -- set_geometry callback isn't present or is no function",
+                    name
+                ));
+                return Ok(Value::Nil);
+            }
+        };
+
+        let map_key = match opts.get::<_, Function>("map") {
+            Ok(cb) => lua.create_registry_value(cb)?,
+            Err(_) => {
+                self.plugin_instance.error(format!(
+                    "error when creating virtual window with name {} -- map callback isn't present or is no function",
+                    name
+                ));
+                return Ok(Value::Nil);
+            }
+        };
+
+        let unmap_key = match opts.get::<_, Function>("unmap") {
+            Ok(cb) => lua.create_registry_value(cb)?,
+            Err(_) => {
+                self.plugin_instance.error(format!(
+                    "error when creating virtual window with name {} -- unmap callback isn't present or is no function",
+                    name
+                ));
+                return Ok(Value::Nil);
+            }
+        };
+
+        let mut min_geometry = MinGeometry::default();
+        if let Ok(min_geometry_str) = opts.get::<_, String>("min_geometry") {
+            match min_geometry_str.parse() {
+                Ok(parsed) => min_geometry = parsed,
+                Err(e) => {
+                    self.plugin_instance.warn(format!(
+                        "error when creating virtual window with name {} (using default): {}",
+                        name, e
+                    ));
+                }
+            };
+        }
+
+        let callbacks = VirtualWindowCallbacks {
+            set_geometry_key,
+            map_key,
+            unmap_key,
+        };
+
+        let mut wm = self.ctx.window_manager.write().unwrap();
+        match wm.manage_virtual_window(lua, name.clone(), callbacks, min_geometry) {
+            Ok(id) => {
+                let window_handle = WindowHandle {
+                    id,
+                    ctx: self.ctx.clone(),
+                    plugin_instance: self.plugin_instance.clone(),
+                };
+                lua.pack(window_handle)
+            }
+            Err(e) => {
+                self.plugin_instance.error(format!(
+                    "couldn't create virtual window with name {}: {}",
+                    name, e
+                ));
+                Ok(Value::Nil)
+            }
+        }
+    }
 }
 
 impl UserData for PluginInstanceHandle {
@@ -268,6 +348,10 @@ impl UserData for PluginInstanceHandle {
 
         methods.add_method("claim_window", |lua, this, (class, opts)| {
             this.claim_window(lua, (class, opts))
+        });
+
+        methods.add_method("create_virtual_window", |lua, this, (name, opts)| {
+            this.create_virtual_window(lua, (name, opts))
         });
     }
 }

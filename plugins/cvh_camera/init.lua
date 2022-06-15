@@ -5,6 +5,12 @@ local default_cameras = 4
 
 local M = {}
 
+local default_geometries = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
+
+M.camera_modules = {}
+M.slot_active_states = {}
+M.camera_handles = {}
+
 local function handle_output(line)
     M.plugin_handle:info("camera server output line " .. line)
 end
@@ -22,11 +28,25 @@ local function handle_notify(line)
         local slot_str = string.sub(line, space + 1)
         local slot = tonumber(slot_str)
         M.slot_active_states[slot + 1] = true
+        M.camera_handles[slot + 1] = M.plugin_handle:create_virtual_window("camera-" .. (slot + 1), {
+            set_geometry = function(x_offset, y_offset, width, height, alignment)
+                M.camera_server_handle:writeln("set_geometry_relative_to_canvas " .. slot ..  " " .. alignment .. " " .. x_offset .. " " .. y_offset .. " " .. width .. " " .. height)
+            end,
+            map = function()
+                M.camera_server_handle:writeln("show " .. slot)
+            end,
+            unmap = function()
+                M.camera_server_handle:writeln("hide " .. slot)
+            end,
+            min_geometry = default_geometries[slot + 1]
+        })
         M.plugin_handle:info("new feed on slot " .. slot)
     elseif type == "remove_feed" then
         local slot_str = string.sub(line, space + 1)
         local slot = tonumber(slot_str)
         M.slot_active_states[slot + 1] = false
+        M.camera_handles[slot + 1]:unclaim()
+        M.camera_handles[slot + 1] = nil
         M.plugin_handle:info("removed feed on slot " .. slot)
     elseif type == "custom_name" then
         M.plugin_handle:warn("camera server custom_name messages are not handled yet")
@@ -62,8 +82,6 @@ M.setup = function(args)
             return
         end
 
-        M.camera_modules = {}
-        M.slot_active_states = {}
         for camera = 1, cameras do
             -- local camera = camera_
             M.slot_active_states[camera] = false
@@ -80,9 +98,24 @@ M.setup = function(args)
                 module_handle:info("stop action")
                 M.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
             end)
-            module_handle:register_action("hide", function() module_handle:info("hide action") end)
-            module_handle:register_action("max", function() module_handle:info("max action") end)
-            module_handle:register_action("min", function() module_handle:info("min action") end)
+            module_handle:register_action("hide", function()
+                module_handle:info("hide action")
+                if M.camera_handles[camera] then
+                    M.camera_handles[camera]:hide()
+                end
+            end)
+            module_handle:register_action("max", function()
+                module_handle:info("max action")
+                if M.camera_handles[camera] then
+                    M.camera_handles[camera]:max({ 1200, 900 })
+                end
+            end)
+            module_handle:register_action("min", function()
+                module_handle:info("min action")
+                if M.camera_handles[camera] then
+                    M.camera_handles[camera]:min()
+                end
+            end)
         end
     end
 
