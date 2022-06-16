@@ -1,5 +1,6 @@
 use crate::plugin_system::{
-    create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, PluginInstance,
+    create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, ModuleStatus,
+    Notification, PluginInstance,
 };
 use crate::window_manager::{
     ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
@@ -399,6 +400,35 @@ impl ModuleHandle {
         }
         Ok(())
     }
+
+    fn set_status(&self, status: ModuleStatus) -> mlua::Result<()> {
+        self.module
+            .debug(format!("setting module status to '{}'", status));
+        let mut module_status = self.module.status.write().unwrap();
+        *module_status = status.clone();
+
+        let send_result = self
+            .ctx
+            .notification_sender
+            .send(Notification::ModuleStautsUpdate {
+                module_identifier: self.module.get_identifier(),
+                new_status: status,
+            });
+
+        if let Err(e) = send_result {
+            self.module.error(format!(
+                "error when broadcasting module status update: {}",
+                e
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn get_status(&self) -> mlua::Result<String> {
+        let module_status = self.module.status.read().unwrap();
+        Ok(module_status.to_string())
+    }
 }
 
 impl UserData for ModuleHandle {
@@ -423,6 +453,10 @@ impl UserData for ModuleHandle {
         methods.add_method("register_action", |lua, this, (name, callback)| {
             this.register_action(lua, (name, callback))
         });
+
+        methods.add_method("set_status", |_lua, this, status| this.set_status(status));
+
+        methods.add_method("get_status", |_lua, this, ()| this.get_status());
     }
 }
 

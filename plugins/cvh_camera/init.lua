@@ -5,7 +5,11 @@ local default_cameras = 4
 
 local M = {}
 
-local default_geometries = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
+local DEFAULT_GEOMETRIES = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
+
+local STATUS_WAITING = "waiting"
+local STATUS_ACTIVE = "active"
+local STATUS_INACTIVE = "inactive"
 
 M.camera_modules = {}
 M.slot_active_states = {}
@@ -39,9 +43,10 @@ local function handle_notify(line)
                 M.camera_server_handle:writeln("hide " .. slot)
             end,
             primary_demotion_action = "make_min",
-            min_geometry = default_geometries[slot + 1]
+            min_geometry = DEFAULT_GEOMETRIES[slot + 1]
         })
         M.plugin_handle:info("new feed on slot " .. slot)
+        M.camera_modules[slot + 1]:set_status(STATUS_ACTIVE)
     elseif type == "remove_feed" then
         local slot_str = string.sub(line, space + 1)
         local slot = tonumber(slot_str)
@@ -49,6 +54,11 @@ local function handle_notify(line)
         M.camera_handles[slot + 1]:unclaim()
         M.camera_handles[slot + 1] = nil
         M.plugin_handle:info("removed feed on slot " .. slot)
+        -- Only set status to waiting when status was active previously. This
+        -- prevents overwriting an inactive status.
+        if M.camera_modules[slot + 1]:get_status() == STATUS_ACTIVE then
+            M.camera_modules[slot + 1]:set_status(STATUS_WAITING)
+        end
     elseif type == "custom_name" then
         M.plugin_handle:warn("camera server custom_name messages are not handled yet")
     end
@@ -88,8 +98,10 @@ M.setup = function(args)
             M.slot_active_states[camera] = false
             local module_handle = M.plugin_handle:register_module("camera-" .. camera)
             M.camera_modules[camera] = module_handle
+            module_handle:set_status(STATUS_INACTIVE)
             module_handle:register_action("start", function()
                 module_handle:info("start action")
+                module_handle:set_status(STATUS_WAITING)
                 -- TODO: Generate secure token every time
                 local token = "token"
                 M.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
@@ -97,6 +109,7 @@ M.setup = function(args)
             end)
             module_handle:register_action("stop", function()
                 module_handle:info("stop action")
+                module_handle:set_status(STATUS_INACTIVE)
                 M.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
             end)
             module_handle:register_action("hide", function()

@@ -4,8 +4,8 @@ use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::{broadcast, mpsc};
 
 mod api;
 mod log;
@@ -16,6 +16,7 @@ const SEPARATOR: &str = "::";
 struct LuaContext {
     plugin_instances: RwLock<Vec<Arc<PluginInstance>>>,
     event_sender: Arc<mpsc::Sender<Event>>,
+    notification_sender: Arc<broadcast::Sender<Notification>>,
     window_manager: RwLock<WindowManager>,
 }
 
@@ -53,6 +54,14 @@ pub enum Event {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum Notification {
+    ModuleStautsUpdate {
+        module_identifier: String,
+        new_status: ModuleStatus,
+    },
+}
+
 #[derive(Debug)]
 pub struct PluginInstance {
     name: String,
@@ -74,11 +83,14 @@ impl LogWithPrefix for PluginInstance {
     }
 }
 
+type ModuleStatus = String;
+
 #[derive(Debug)]
 struct Module {
     name: String,
     plugin_instance_name: String,
     actions: RwLock<Vec<Action>>,
+    status: RwLock<ModuleStatus>,
 }
 
 impl Module {
@@ -87,7 +99,12 @@ impl Module {
             name,
             plugin_instance_name,
             actions: RwLock::new(Vec::new()),
+            status: RwLock::new("unknown".to_string()),
         }
+    }
+
+    fn get_identifier(&self) -> String {
+        format!("{}{}{}", self.plugin_instance_name, SEPARATOR, self.name)
     }
 }
 
@@ -120,6 +137,21 @@ fn list_actions(ctx: &LuaContext) -> Vec<String> {
         }
     }
     action_identifiers
+}
+
+fn list_statuses(ctx: &LuaContext) -> Vec<String> {
+    let mut status_lines = vec![];
+    for plugin_instance in ctx.plugin_instances.read().unwrap().iter() {
+        for module in plugin_instance.modules.read().unwrap().iter() {
+            let status = module.status.read().unwrap();
+            let status_line = format!(
+                "{}{}{} -- {}",
+                plugin_instance.name, SEPARATOR, module.name, status
+            );
+            status_lines.push(status_line)
+        }
+    }
+    status_lines
 }
 
 fn call_action(lua: &Lua, ctx: &LuaContext, action_identifier: &str) -> anyhow::Result<()> {
@@ -185,16 +217,18 @@ fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
 }
 
 pub fn start(
-    event_sender: mpsc::Sender<Event>,
-    event_receiver: mpsc::Receiver<Event>,
+    event_tx: mpsc::Sender<Event>,
+    event_rx: mpsc::Receiver<Event>,
+    notification_tx: broadcast::Sender<Notification>,
     window_manager: WindowManager,
 ) -> anyhow::Result<()> {
     let lua = Lua::new();
 
     let ctx = Arc::new(LuaContext {
         plugin_instances: RwLock::new(Vec::new()),
-        event_sender: Arc::new(event_sender),
+        event_sender: Arc::new(event_tx),
         window_manager: RwLock::new(window_manager),
+        notification_sender: Arc::new(notification_tx),
     });
 
     let globals = lua.globals();
@@ -216,7 +250,7 @@ pub fn start(
 
     info!("plugins loaded");
 
-    event_loop(&lua, ctx, event_receiver);
+    event_loop(&lua, ctx, event_rx);
 
     Ok(())
 }
@@ -230,9 +264,13 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                 command,
                 reply_sender,
             } => {
-                if command == "list" {
+                if command == "actions" {
                     let actions = list_actions(&ctx);
                     let reply = actions.join("\n");
+                    let _ = reply_sender.send(reply);
+                } else if command == "statuses" {
+                    let statuses = list_statuses(&ctx);
+                    let reply = statuses.join("\n");
                     let _ = reply_sender.send(reply);
                 } else if let Some(identifier) = command.strip_prefix("call ") {
                     match call_action(lua, &ctx, identifier) {
