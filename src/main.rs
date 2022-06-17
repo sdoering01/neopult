@@ -5,6 +5,7 @@ use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 mod plugin_system;
+mod server;
 mod window_manager;
 
 use plugin_system::{Event, Notification};
@@ -86,10 +87,13 @@ fn main() -> Result<()> {
         move || plugin_system::start(event_tx, plugin_event_rx, notification_tx, wm)
     });
 
-    let mut terminal_client_handle =
-        runtime.spawn(terminal_client(plugin_event_tx, plugin_notification_tx));
-
     runtime.block_on(async {
+        let mut server_handle = tokio::spawn(server::start(
+            plugin_event_tx.clone(),
+            plugin_notification_tx.clone(),
+        ));
+        let mut terminal_client_handle =
+            tokio::spawn(terminal_client(plugin_event_tx, plugin_notification_tx));
         tokio::select!(
             join_result = &mut plugin_system_handle => {
                 eprint!("error: plugin system exited ");
@@ -98,11 +102,23 @@ fn main() -> Result<()> {
                     Ok(Err(e)) => eprintln!("with system error: {:?}", e),
                     Err(e) => eprintln!("with join error: {}", e),
                 };
+                server_handle.abort();
+                terminal_client_handle.abort();
+            },
+            join_result = &mut server_handle => {
+                eprint!("error: server exited ");
+                match join_result {
+                    Ok(Ok(_)) => eprintln!("without error"),
+                    Ok(Err(e)) => eprintln!("with error: {:?}", e),
+                    Err(e) => eprintln!("with join error: {}", e),
+                }
+                plugin_system_handle.abort();
                 terminal_client_handle.abort();
             },
             _ = &mut terminal_client_handle => {
                 println!("terminal client exited");
                 plugin_system_handle.abort();
+                server_handle.abort();
             },
         );
         Ok(())
