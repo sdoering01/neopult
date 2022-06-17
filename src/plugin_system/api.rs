@@ -410,7 +410,7 @@ impl ModuleHandle {
         let send_result = self
             .ctx
             .notification_sender
-            .send(Notification::ModuleStautsUpdate {
+            .send(Notification::ModuleStatusUpdate {
                 module_identifier: self.module.get_identifier(),
                 new_status: status,
             });

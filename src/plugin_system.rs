@@ -2,6 +2,7 @@ use crate::window_manager::WindowManager;
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::sync::oneshot;
@@ -54,9 +55,10 @@ pub enum Event {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Notification {
-    ModuleStautsUpdate {
+    ModuleStatusUpdate {
         module_identifier: String,
         new_status: ModuleStatus,
     },

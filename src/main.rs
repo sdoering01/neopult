@@ -46,10 +46,12 @@ async fn terminal_client(
             notification_result = plugin_notification_rx.recv() => {
                 match notification_result {
                     Ok(notification) => {
+                        let json = serde_json::to_string(&notification).expect("serialization");
                         match notification {
-                            Notification::ModuleStautsUpdate { module_identifier, new_status } =>
+                            Notification::ModuleStatusUpdate { module_identifier, new_status } =>
                                 println!("new module status for {}: '{}'", module_identifier, new_status),
                         }
+                        println!("  json: {}", json);
                     }
                     Err(e) => {
                         eprintln!("error when receiving notification: {}", e);
