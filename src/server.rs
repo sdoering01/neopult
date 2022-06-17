@@ -9,7 +9,7 @@ use axum::{
     Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
-use log::{error, warn};
+use log::{error, info, warn};
 use serde_json;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{
@@ -36,6 +36,7 @@ pub async fn start(
         .route("/ws", get(websocket_handler))
         .layer(Extension(ctx));
     let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
+    info!("starting server on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await?;
