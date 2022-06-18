@@ -90,7 +90,8 @@ pub enum Event {
 #[serde(rename_all = "snake_case")]
 pub enum Notification {
     ModuleStatusUpdate {
-        module_identifier: String,
+        #[serde(flatten)]
+        module_identifier: ModuleIdentifier,
         new_status: ModuleStatus,
     },
 }
@@ -135,10 +136,6 @@ impl Module {
             status: RwLock::new("unknown".to_string()),
         }
     }
-
-    fn get_identifier(&self) -> String {
-        format!("{}{}{}", self.plugin_instance_name, SEPARATOR, self.name)
-    }
 }
 
 impl LogWithPrefix for Module {
@@ -154,6 +151,18 @@ impl LogWithPrefix for Module {
 struct Action {
     name: String,
     key: RegistryKey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleIdentifier {
+    pub plugin_instance: String,
+    pub module: String,
+}
+
+impl Display for ModuleIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}{}", self.plugin_instance, SEPARATOR, self.module)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

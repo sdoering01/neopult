@@ -1,6 +1,6 @@
 use crate::plugin_system::{
-    create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, ModuleStatus,
-    Notification, PluginInstance,
+    create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, ModuleIdentifier,
+    ModuleStatus, Notification, PluginInstance,
 };
 use crate::window_manager::{
     ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
@@ -411,7 +411,10 @@ impl ModuleHandle {
             .ctx
             .notification_sender
             .send(Notification::ModuleStatusUpdate {
-                module_identifier: self.module.get_identifier(),
+                module_identifier: ModuleIdentifier {
+                    plugin_instance: self.module.plugin_instance_name.clone(),
+                    module: self.module.name.clone(),
+                },
                 new_status: status,
             });
 
