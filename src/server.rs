@@ -1,4 +1,4 @@
-use crate::plugin_system::{Event, Notification};
+use crate::plugin_system::{ActionIdentifier, ClientCommand, Event, Notification, SystemInfo};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -10,6 +10,7 @@ use axum::{
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use log::{error, info, warn};
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::{
@@ -21,6 +22,62 @@ use tokio::sync::{
 struct WebContext {
     notification_sender: broadcast::Sender<Notification>,
     event_sender: mpsc::Sender<Event>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServerResponse {
+    request_id: String,
+    success: bool,
+    message: Option<String>,
+}
+
+impl ServerResponse {
+    fn new(request_id: String, success: bool, message: Option<String>) -> Self {
+        Self {
+            request_id,
+            success,
+            message,
+        }
+    }
+
+    fn new_success(request_id: String) -> Self {
+        Self::new(request_id, true, None)
+    }
+
+    fn new_internal_error(request_id: String) -> Self {
+        Self::new(request_id, false, Some("Internal Server Error".to_string()))
+    }
+
+    fn from_error(request_id: String, error: anyhow::Error) -> Self {
+        Self::new(request_id, false, Some(format!("{:?}", error)))
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FromServerError {
+    ParseError(String),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FromServer {
+    SystemInfo(SystemInfo),
+    Notification(Notification),
+    Response(ServerResponse),
+    Error(FromServerError),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct FromClient {
+    request_id: String,
+    body: FromClientBody,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FromClientBody {
+    CallAction(ActionIdentifier),
 }
 
 pub async fn start(
@@ -53,8 +110,25 @@ async fn websocket_handler(
 async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
     let (mut sender, mut receiver) = stream.split();
 
+    // Add auth here
+
     let mut notification_receiver = ctx.notification_sender.subscribe();
     let event_sender = ctx.event_sender.clone();
+
+    let (tx, rx) = oneshot::channel();
+    event_sender
+        .send(Event::FetchSystemInfo { reply_sender: tx })
+        .await
+        .expect("event receiver was closed");
+    let system_info = rx.await.expect("fetch system info got no reply");
+    let msg = FromServer::SystemInfo(system_info);
+    let json = serde_json::to_string(&msg).expect("serialization failed");
+    // Prevent accidental reuse when using variable with same name
+    drop(msg);
+
+    if sender.send(Message::Text(json)).await.is_err() {
+        return;
+    }
 
     loop {
         tokio::select!(
@@ -68,10 +142,11 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
                     }
                 };
 
-                let json = match serde_json::to_string(&notification) {
+                let msg = FromServer::Notification(notification);
+                let json = match serde_json::to_string(&msg) {
                     Ok(msg) => msg,
                     Err(e) => {
-                        error!("could not serialize notification {:?}: {}", notification, e);
+                        error!("could not serialize notification message {:?}: {}", msg, e);
                         continue;
                     }
                 };
@@ -82,21 +157,48 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
             }
             command_option = receiver.next() => {
                 match command_option {
-                    Some(Ok(Message::Text(command))) => {
-                        let command = command.trim().to_string();
-                        let (tx, rx) = oneshot::channel();
-                        if event_sender.send(Event::CliCommand { command, reply_sender: tx }).await.is_err() {
-                            warn!("event receiver was closed");
-                            break;
-                        }
-                        let reply = match rx.await {
-                            Ok(r) => r,
-                            Err(_) => "no reply".to_string(),
+                    Some(Ok(Message::Text(client_json))) => {
+                        let client_msg: FromClient = match serde_json::from_str(&client_json) {
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                warn!("could not parse client request: {} -- request was: {}", e, client_json);
+                                let server_msg = FromServer::Error(FromServerError::ParseError(e.to_string()));
+                                let server_json = serde_json::to_string(&server_msg).expect("serialization failed");
+                                if sender.send(Message::Text(server_json)).await.is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
                         };
 
-                        if sender.send(Message::Text(reply)).await.is_err() {
-                            break;
-                        }
+                        let request_id = client_msg.request_id;
+
+                        match client_msg.body {
+                            FromClientBody::CallAction(identifier) => {
+                                let (tx, rx) = oneshot::channel();
+                                let command = ClientCommand::CallAction {
+                                    identifier: identifier.clone(),
+                                    error_sender: tx
+                                };
+                                send_client_command(&event_sender, command).await;
+
+                                let response = match rx.await {
+                                    Ok(Ok(_)) => ServerResponse::new_success(request_id),
+                                    Ok(Err(e)) => {
+                                        error!("error when calling action {}: {}", identifier, e);
+                                        ServerResponse::from_error(request_id, e)
+                                    },
+                                    Err(_) => {
+                                        error!("plugin system didn't reply to call action command");
+                                        ServerResponse::new_internal_error(request_id)
+                                    },
+                                };
+                                let json = serde_json::to_string(&FromServer::Response(response)).expect("serialization failed");
+                                if sender.send(Message::Text(json)).await.is_err() {
+                                    break;
+                                }
+                            },
+                        };
                     }
                     _ => {
                         break;
@@ -105,4 +207,11 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
             }
         );
     }
+}
+
+async fn send_client_command(event_sender: &mpsc::Sender<Event>, command: ClientCommand) {
+    event_sender
+        .send(Event::ClientCommand(command))
+        .await
+        .expect("event receiver was closed");
 }

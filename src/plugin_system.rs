@@ -3,10 +3,11 @@ use ::log::{debug, error, info, warn};
 use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::sync::RwLock;
-use tokio::sync::oneshot;
-use tokio::sync::{broadcast, mpsc};
+use std::{
+    fmt::{self, Display, Formatter},
+    sync::{Arc, RwLock},
+};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 mod api;
 mod log;
@@ -41,6 +42,32 @@ trait LogWithPrefix {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemInfo {
+    plugin_instances: Vec<PluginInstanceInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PluginInstanceInfo {
+    name: String,
+    modules: Vec<ModuleInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ModuleInfo {
+    name: String,
+    status: ModuleStatus,
+    actions: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum ClientCommand {
+    CallAction {
+        identifier: ActionIdentifier,
+        error_sender: oneshot::Sender<anyhow::Result<()>>,
+    },
+}
+
 #[derive(Debug)]
 pub enum Event {
     ProcessOutput {
@@ -53,6 +80,10 @@ pub enum Event {
         command: String,
         reply_sender: oneshot::Sender<String>,
     },
+    FetchSystemInfo {
+        reply_sender: oneshot::Sender<SystemInfo>,
+    },
+    ClientCommand(ClientCommand),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -125,6 +156,23 @@ struct Action {
     key: RegistryKey,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionIdentifier {
+    pub plugin_instance: String,
+    pub module: String,
+    pub action: String,
+}
+
+impl Display for ActionIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}{}{}{}{}",
+            self.plugin_instance, SEPARATOR, self.module, SEPARATOR, self.action
+        )
+    }
+}
+
 fn list_actions(ctx: &LuaContext) -> Vec<String> {
     let mut action_identifiers = vec![];
     for plugin_instance in ctx.plugin_instances.read().unwrap().iter() {
@@ -156,27 +204,42 @@ fn list_statuses(ctx: &LuaContext) -> Vec<String> {
     status_lines
 }
 
-fn call_action(lua: &Lua, ctx: &LuaContext, action_identifier: &str) -> anyhow::Result<()> {
-    let tokens = action_identifier.split(SEPARATOR).collect::<Vec<_>>();
+fn call_action_string(lua: &Lua, ctx: &LuaContext, action_string: &str) -> anyhow::Result<()> {
+    let tokens = action_string.split(SEPARATOR).collect::<Vec<_>>();
     if tokens.len() != 3 {
-        anyhow::bail!("malformed action identifier: \"{}\"", action_identifier);
+        anyhow::bail!("malformed action identifier: \"{}\"", action_string);
     }
+    let identifier = ActionIdentifier {
+        plugin_instance: tokens[0].to_string(),
+        module: tokens[1].to_string(),
+        action: tokens[2].to_string(),
+    };
 
+    call_action(lua, ctx, identifier)
+}
+
+fn call_action(lua: &Lua, ctx: &LuaContext, identifier: ActionIdentifier) -> anyhow::Result<()> {
     let plugin_instances = ctx.plugin_instances.read().unwrap();
-    let plugin_instance = match plugin_instances.iter().find(|p| p.name == tokens[0]) {
-        None => anyhow::bail!("no plugin instance with name {}", tokens[0]),
+    let plugin_instance = match plugin_instances
+        .iter()
+        .find(|p| p.name == identifier.plugin_instance)
+    {
+        None => anyhow::bail!(
+            "no plugin instance with name {}",
+            identifier.plugin_instance
+        ),
         Some(p) => p,
     };
 
     let modules = plugin_instance.modules.read().unwrap();
-    let module = match modules.iter().find(|m| m.name == tokens[1]) {
-        None => anyhow::bail!("no module with name {}", tokens[1]),
+    let module = match modules.iter().find(|m| m.name == identifier.module) {
+        None => anyhow::bail!("no module with name {}", identifier.module),
         Some(m) => m,
     };
 
     let actions = module.actions.read().unwrap();
-    let action = match actions.iter().find(|a| a.name == tokens[2]) {
-        None => anyhow::bail!("no action with name {}", tokens[2]),
+    let action = match actions.iter().find(|a| a.name == identifier.action) {
+        None => anyhow::bail!("no action with name {}", identifier.action),
         Some(a) => a,
     };
 
@@ -189,6 +252,45 @@ fn call_action(lua: &Lua, ctx: &LuaContext, action_identifier: &str) -> anyhow::
         .context("action callback failed")?;
 
     Ok(())
+}
+
+fn system_info(ctx: &LuaContext) -> SystemInfo {
+    let plugin_instances = ctx
+        .plugin_instances
+        .read()
+        .unwrap()
+        .iter()
+        .map(|plugin_instance| {
+            let name = plugin_instance.name.clone();
+            let modules = plugin_instance
+                .modules
+                .read()
+                .unwrap()
+                .iter()
+                .map(|module| {
+                    let name = module.name.clone();
+                    let actions = module
+                        .actions
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .map(|action| action.name.clone())
+                        .collect();
+                    let status = module.status.read().unwrap().to_string();
+
+                    ModuleInfo {
+                        name,
+                        status,
+                        actions,
+                    }
+                })
+                .collect();
+
+            PluginInstanceInfo { name, modules }
+        })
+        .collect();
+
+    SystemInfo { plugin_instances }
 }
 
 /// Wraps the `mlua::create_function` call and passes the `ctx` as the third argument to `func`.
@@ -275,7 +377,7 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                     let reply = statuses.join("\n");
                     let _ = reply_sender.send(reply);
                 } else if let Some(identifier) = command.strip_prefix("call ") {
-                    match call_action(lua, &ctx, identifier) {
+                    match call_action_string(lua, &ctx, identifier) {
                         Ok(_) => {
                             let _ = reply_sender.send("action called successfully".to_string());
                         }
@@ -303,6 +405,21 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                     }
                 }
             }
+            Event::FetchSystemInfo { reply_sender } => {
+                let system_info = system_info(&ctx);
+                if reply_sender.send(system_info).is_err() {
+                    warn!("fetch system info: reply receiver was closed");
+                }
+            }
+            Event::ClientCommand(cmd) => match cmd {
+                ClientCommand::CallAction {
+                    identifier,
+                    error_sender,
+                } => {
+                    let call_result = call_action(&lua, &ctx, identifier);
+                    let _ = error_sender.send(call_result);
+                }
+            },
         }
     }
 }
