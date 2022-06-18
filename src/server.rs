@@ -4,19 +4,21 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Extension,
     },
+    http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, get_service},
     Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::{net::SocketAddr, sync::Arc};
+use std::{io, net::SocketAddr, sync::Arc};
 use tokio::sync::{
     broadcast::{self, error::RecvError},
     mpsc, oneshot,
 };
+use tower_http::services::ServeDir;
 
 #[derive(Debug)]
 struct WebContext {
@@ -91,6 +93,9 @@ pub async fn start(
 
     let app = Router::new()
         .route("/ws", get(websocket_handler))
+        .fallback(
+            get_service(ServeDir::new("web")).handle_error(handle_error),
+        )
         .layer(Extension(ctx));
     let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
     info!("starting server on {}", addr);
@@ -98,6 +103,10 @@ pub async fn start(
         .serve(app.into_make_service())
         .await?;
     Ok(())
+}
+
+async fn handle_error(_err: io::Error) -> impl IntoResponse {
+    (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong...")
 }
 
 async fn websocket_handler(
