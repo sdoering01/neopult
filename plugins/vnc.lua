@@ -80,12 +80,6 @@ M.setup = function()
                     M.window_handle:max({ 1920, 1080 })
                 end
             end)
-            M.module_handle:register_action("min", function()
-                M.module_handle:info("min action called")
-                if M.module_handle:get_status() == STATUS_ACTIVE then
-                    M.window_handle:min()
-                end
-            end)
             M.module_handle:register_action("hide", function()
                 M.module_handle:info("hide action called")
                 if M.module_handle:get_status() == STATUS_ACTIVE then
