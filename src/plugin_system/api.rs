@@ -7,6 +7,7 @@ use crate::window_manager::{
 };
 use ::log::{debug, error};
 use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
+use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 use std::io::{prelude::*, BufReader};
 use std::process::{Child, Command, Stdio};
@@ -625,6 +626,11 @@ fn register_plugin_instance<'lua>(
     }
 }
 
+fn generate_token(num_chars: u8) -> mlua::Result<String> {
+    let token = Alphanumeric.sample_string(&mut rand::thread_rng(), num_chars as usize);
+    Ok(token)
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -635,6 +641,10 @@ pub(super) fn inject_api_functions(
     api.set(
         "register_plugin_instance",
         create_context_function(lua, ctx, register_plugin_instance)?,
+    )?;
+    api.set(
+        "generate_token",
+        lua.create_function(|_lua, num_chars| generate_token(num_chars))?,
     )?;
 
     neopult.set("api", api)?;

@@ -512,6 +512,7 @@ dependencies = [
  "log",
  "mlua",
  "os_pipe",
+ "rand",
  "serde",
  "serde_json",
  "tokio",

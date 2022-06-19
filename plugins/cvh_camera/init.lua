@@ -3,17 +3,19 @@ local log = neopult.log
 
 local default_cameras = 4
 
-local M = {}
-
 local DEFAULT_GEOMETRIES = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
 
 local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
+local M = {}
+
 M.camera_modules = {}
 M.slot_active_states = {}
 M.camera_handles = {}
+
+M.generate_secure_tokens = true
 
 local function handle_output(line)
     M.plugin_handle:info("camera server output line " .. line)
@@ -67,6 +69,9 @@ end
 M.setup = function(args)
     local args = args or {}
     local cameras = args.cameras or default_cameras
+    if args.generate_secure_tokens == false then
+        M.generate_secure_tokens = false
+    end
 
     M.plugin_handle = api.register_plugin_instance("cvh-camera")
     if M.plugin_handle then
@@ -102,8 +107,14 @@ M.setup = function(args)
             module_handle:register_action("start", function()
                 module_handle:info("start action")
                 module_handle:set_status(STATUS_WAITING)
-                -- TODO: Generate secure token every time
-                local token = "token"
+
+                local token
+                if M.generate_secure_tokens then
+                    token = api.generate_token(20)
+                else
+                    token = "token"
+                end
+
                 M.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
                 module_handle:info("go to http://localhost:3000/camera-sender.html?token=" .. token .. "&slot=" .. (camera - 1))
             end)
