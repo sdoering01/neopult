@@ -17,6 +17,10 @@ M.camera_handles = {}
 
 M.generate_secure_tokens = true
 
+local function generate_sender_message(sender_link)
+    return "follow <a href=\"" .. sender_link .. "\" target=\"_blank\">this link</a> to the camera sender"
+end
+
 local function handle_output(line)
     M.plugin_handle:info("camera server output line " .. line)
 end
@@ -106,7 +110,6 @@ M.setup = function(args)
             module_handle:set_status(STATUS_INACTIVE)
             module_handle:register_action("start", function()
                 module_handle:info("start action")
-                module_handle:set_status(STATUS_WAITING)
 
                 local token
                 if M.generate_secure_tokens then
@@ -116,11 +119,17 @@ M.setup = function(args)
                 end
 
                 M.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
-                module_handle:info("go to http://localhost:3000/camera-sender.html?token=" .. token .. "&slot=" .. (camera - 1))
+                module_handle:set_status(STATUS_WAITING)
+
+                local sender_link = "http://localhost:3000/camera-sender.html?token=" .. token .. "&slot=" .. (camera - 1)
+                local sender_message = generate_sender_message(sender_link)
+                module_handle:info(sender_message)
+                module_handle:set_message(sender_message)
             end)
             module_handle:register_action("stop", function()
                 module_handle:info("stop action")
                 module_handle:set_status(STATUS_INACTIVE)
+                module_handle:set_message(nil)
                 M.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
             end)
             module_handle:register_action("hide", function()

@@ -194,7 +194,7 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
                                 let response = match rx.await {
                                     Ok(Ok(_)) => ServerResponse::new_success(request_id),
                                     Ok(Err(e)) => {
-                                        error!("error when calling action {}: {}", identifier, e);
+                                        error!("error when calling action {}: {:?}", identifier, e);
                                         ServerResponse::from_error(request_id, e)
                                     },
                                     Err(_) => {

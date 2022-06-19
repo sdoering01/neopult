@@ -53,8 +53,12 @@ M.setup = function()
                         args = { "-listen", "6" },
                         on_output = M.handle_line,
                     })
-                    M.plugin_handle:info("connect to localhost:5506")
                     M.module_handle:set_status(STATUS_WAITING)
+
+                    local address = "127.0.0.1:5506"
+                    local message = "with a vnc client connect to " .. address
+                    M.module_handle:info(message)
+                    M.module_handle:set_message(message)
                 end
             end)
             M.module_handle:register_action("stop", function()

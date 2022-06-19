@@ -3,6 +3,7 @@ let requestId = 1;
 
 const appContainerEl = document.getElementById('app');
 const moduleStatusElements = {};
+const moduleMessageElements = {};
 
 const callAction = (pluginInstance, module, action) => {
     const request = {
@@ -40,36 +41,48 @@ socket.addEventListener('message', (event) => {
         containerEl.classList.add('modules');
         for (const pluginInstance of msg.system_info.plugin_instances) {
             for (const module of pluginInstance.modules) {
+                const moduleIdentifier = `${pluginInstance.name}::${module.name}`;
+
                 const moduleContainerEl = document.createElement('div');
                 moduleContainerEl.classList.add('module-container');
+                containerEl.appendChild(moduleContainerEl);
 
                 const moduleInfoEl = document.createElement('div');
                 moduleInfoEl.classList.add('module-info');
+                moduleContainerEl.appendChild(moduleInfoEl);
 
                 const moduleNameEl = document.createElement('span');
                 moduleNameEl.innerText = module.name;
                 moduleNameEl.classList.add('module-info__name');
+                moduleInfoEl.appendChild(moduleNameEl);
+
                 const moduleStatusEl = document.createElement('span');
                 moduleStatusEl.innerText = module.status;
                 moduleStatusEl.classList.add('module-info__status');
-                moduleStatusElements[`${pluginInstance.name}::${module.name}`] = moduleStatusEl;
-
-                moduleInfoEl.append(moduleNameEl, moduleStatusEl);
+                moduleStatusElements[moduleIdentifier] = moduleStatusEl;
+                moduleInfoEl.appendChild(moduleStatusEl);
 
                 const moduleActionsEl = document.createElement('div');
                 moduleActionsEl.classList.add('module-actions');
-                moduleContainerEl.append(moduleInfoEl, moduleActionsEl);
-                containerEl.appendChild(moduleContainerEl);
+                moduleContainerEl.appendChild(moduleActionsEl);
                 for (const action of module.actions) {
                     const actionButtonEl = document.createElement('button');
                     actionButtonEl.classList.add('action-button');
                     actionButtonEl.innerText = action;
                     actionButtonEl.onclick = () => {
-                        console.log(`call ${pluginInstance.name}::${module.name}::${action}`);
+                        console.log(`call ${moduleIdentifier}::${action}`);
                         callAction(pluginInstance.name, module.name, action);
                     };
                     moduleActionsEl.appendChild(actionButtonEl);
                 }
+
+                const moduleMessageEl = document.createElement('div');
+                moduleMessageEl.classList.add('module-message');
+                if (module.message) {
+                    moduleMessageEl.innerHTML = module.message;
+                }
+                moduleMessageElements[moduleIdentifier] = moduleMessageEl;
+                moduleContainerEl.appendChild(moduleMessageEl);
             }
             appContainerEl.appendChild(containerEl);
         }
@@ -79,6 +92,12 @@ socket.addEventListener('message', (event) => {
             const update = notification.module_status_update;
             const identifier = `${update.plugin_instance}::${update.module}`;
             moduleStatusElements[identifier].innerText = update.new_status;
+        } else if (notification.module_message_update) {
+            const update = notification.module_message_update;
+            const identifier = `${update.plugin_instance}::${update.module}`;
+            // const newMessage = update.new_message || '';
+            // Hide message field maybe
+            moduleMessageElements[identifier].innerHTML = update.new_message;
         }
     }
 });

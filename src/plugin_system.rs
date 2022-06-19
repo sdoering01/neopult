@@ -56,8 +56,9 @@ pub struct PluginInstanceInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleInfo {
     name: String,
-    status: ModuleStatus,
     actions: Vec<String>,
+    status: ModuleStatus,
+    message: Option<ModuleMessage>,
 }
 
 #[derive(Debug)]
@@ -94,6 +95,11 @@ pub enum Notification {
         module_identifier: ModuleIdentifier,
         new_status: ModuleStatus,
     },
+    ModuleMessageUpdate {
+        #[serde(flatten)]
+        module_identifier: ModuleIdentifier,
+        new_message: Option<ModuleMessage>,
+    },
 }
 
 #[derive(Debug)]
@@ -118,6 +124,7 @@ impl LogWithPrefix for PluginInstance {
 }
 
 type ModuleStatus = String;
+type ModuleMessage = String;
 
 #[derive(Debug)]
 struct Module {
@@ -125,6 +132,7 @@ struct Module {
     plugin_instance_name: String,
     actions: RwLock<Vec<Action>>,
     status: RwLock<ModuleStatus>,
+    message: RwLock<Option<ModuleMessage>>,
 }
 
 impl Module {
@@ -134,6 +142,7 @@ impl Module {
             plugin_instance_name,
             actions: RwLock::new(Vec::new()),
             status: RwLock::new("unknown".to_string()),
+            message: RwLock::new(None),
         }
     }
 }
@@ -286,11 +295,13 @@ fn system_info(ctx: &LuaContext) -> SystemInfo {
                         .map(|action| action.name.clone())
                         .collect();
                     let status = module.status.read().unwrap().to_string();
+                    let message = module.message.read().unwrap().clone();
 
                     ModuleInfo {
                         name,
-                        status,
                         actions,
+                        status,
+                        message,
                     }
                 })
                 .collect();
@@ -408,7 +419,7 @@ fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receive
                 if let Ok(callback) = lua.registry_value::<Function>(&callback_key) {
                     if let Err(e) = callback.call::<_, Value>(line) {
                         plugin_instance.error(format!(
-                            "error when handling callback for process {}: {}",
+                            "error when handling callback for process {}: {:?}",
                             process_name, e
                         ));
                     }

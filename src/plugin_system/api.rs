@@ -1,6 +1,6 @@
 use crate::plugin_system::{
     create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, ModuleIdentifier,
-    ModuleStatus, Notification, PluginInstance,
+    ModuleMessage, ModuleStatus, Notification, PluginInstance,
 };
 use crate::window_manager::{
     ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
@@ -433,6 +433,33 @@ impl ModuleHandle {
         let module_status = self.module.status.read().unwrap();
         Ok(module_status.to_string())
     }
+
+    fn set_message(&self, message: Option<ModuleMessage>) -> mlua::Result<()> {
+        self.module
+            .debug(format!("setting module message to '{:?}'", message));
+        let mut module_message = self.module.message.write().unwrap();
+        *module_message = message.clone();
+
+        let send_result = self
+            .ctx
+            .notification_sender
+            .send(Notification::ModuleMessageUpdate {
+                module_identifier: ModuleIdentifier {
+                    plugin_instance: self.module.plugin_instance_name.clone(),
+                    module: self.module.name.clone(),
+                },
+                new_message: message,
+            });
+
+        if let Err(e) = send_result {
+            self.module.error(format!(
+                "error when broadcasting module message update: {}",
+                e
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 impl UserData for ModuleHandle {
@@ -461,6 +488,10 @@ impl UserData for ModuleHandle {
         methods.add_method("set_status", |_lua, this, status| this.set_status(status));
 
         methods.add_method("get_status", |_lua, this, ()| this.get_status());
+
+        methods.add_method("set_message", |_lua, this, message| {
+            this.set_message(message)
+        });
     }
 }
 

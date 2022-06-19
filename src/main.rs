@@ -51,6 +51,10 @@ async fn terminal_client(
                         match notification {
                             Notification::ModuleStatusUpdate { module_identifier, new_status } =>
                                 println!("new module status for {}: '{}'", module_identifier, new_status),
+                            Notification::ModuleMessageUpdate { module_identifier, new_message: Some(msg) } =>
+                                println!("new module message for {}: '{}'", module_identifier, msg),
+                            Notification::ModuleMessageUpdate { module_identifier, new_message: None } =>
+                                println!("cleared message for module {}", module_identifier),
                         }
                         println!("  json: {}", json);
                     }
