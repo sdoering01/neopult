@@ -15,6 +15,7 @@ M.camera_modules = {}
 M.slot_active_states = {}
 M.camera_handles = {}
 
+M.sender_base_url = nil
 M.generate_secure_tokens = true
 
 local function generate_sender_message(sender_link)
@@ -81,6 +82,10 @@ M.setup = function(args)
         error("cvh_camera plugin setup called without mandatory `camera_server_path` parameter")
     end
 
+    if args.sender_base_url == nil then
+        error("cvh_camera plugin setup called without mandatory `sender_base_url` parameter")
+    end
+    M.sender_base_url = args.sender_base_url
 
     M.plugin_handle = api.register_plugin_instance("cvh-camera")
     if M.plugin_handle then
@@ -126,7 +131,7 @@ M.setup = function(args)
                 M.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
                 module_handle:set_status(STATUS_WAITING)
 
-                local sender_link = "http://localhost:3000/camera-sender.html?token=" .. token .. "&slot=" .. (camera - 1)
+                local sender_link = M.sender_base_url .. "?token=" .. token .. "&slot=" .. (camera - 1)
                 local sender_message = generate_sender_message(sender_link)
                 module_handle:info(sender_message)
                 module_handle:set_message(sender_message)
