@@ -97,7 +97,7 @@ pub async fn start(
             get_service(ServeDir::new("web")).handle_error(handle_error),
         )
         .layer(Extension(ctx));
-    let addr = SocketAddr::from(([0, 0, 0, 0], 4000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 4200));
     info!("starting server on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
