@@ -1,4 +1,6 @@
-const socket = new WebSocket('ws://localhost:4000/ws');
+const webSocketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
+const socket = new WebSocket(`${webSocketProtocol}//${window.location.host}/ws`);
+
 let requestId = 1;
 
 const appContainerEl = document.getElementById('app');
