@@ -73,6 +73,7 @@ M.setup = function()
                     M.process_handle = nil
                 end
                 M.module_handle:set_status(STATUS_INACTIVE)
+                M.module_handle:set_message(nil)
             end)
             M.module_handle:register_action("max", function()
                 M.module_handle:info("max action called")
