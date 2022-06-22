@@ -71,16 +71,21 @@ local function handle_notify(line)
 end
 
 M.setup = function(args)
-    local args = args or {}
+    args = args or {}
     local cameras = args.cameras or default_cameras
     if args.generate_secure_tokens == false then
         M.generate_secure_tokens = false
     end
 
+    if args.camera_server_path == nil then
+        error("cvh_camera plugin setup called without mandatory `camera_server_path` parameter")
+    end
+
+
     M.plugin_handle = api.register_plugin_instance("cvh-camera")
     if M.plugin_handle then
         M.camera_server_handle = M.plugin_handle:spawn_process("node", {
-            args = { "/home/simon/shared/code/cvh-camera/camera-server/dist/server.js" },
+            args = { args.camera_server_path },
             envs = { CONFIG_PATH = "./plugins/cvh_camera/config.json" },
             on_output = handle_output
         })
