@@ -1,7 +1,6 @@
 local api = neopult.api
 local log = neopult.log
 
-local FEED_START = "Desktop name "
 local FEED_END = "ssvncviewer: VNC server closed connection"
 
 local STATUS_WAITING = "waiting"
@@ -14,16 +13,26 @@ M.plugin_handle = nil
 M.module_handle = nil
 M.window_handle = nil
 
+M.resolution = nil
+
 M.handle_line = function(line)
     local cur_status = M.module_handle:get_status()
     if cur_status == STATUS_WAITING then
-        if string.sub(line, 1, #FEED_START) == FEED_START then
-            M.plugin_handle:debug("got new vnc feed")
+        -- example line: `try_create_image: created *non-shm* image: 1920x1080`
+        local match_fn = string.gmatch(line, "try_create_image: created.* image: (%d+)x(%d+)")
+        local width_str, height_str = match_fn()
+        if width_str and height_str then
+            local width = tonumber(width_str)
+            local height = tonumber(height_str)
+            M.resolution = { width, height }
+            M.plugin_handle:debug("got new vnc feed with resolution " .. width .. "x" .. height)
             M.window_handle = M.plugin_handle:claim_window("ssvncviewer", { timeout_ms = 1000 })
             if M.window_handle then
-                M.window_handle:max({ 1920, 1080 })
+                M.window_handle:max(M.resolution)
+                M.module_handle:set_status(STATUS_ACTIVE)
+            else
+                M.plugin_handle:error("got feed but could not claim window in time")
             end
-            M.module_handle:set_status(STATUS_ACTIVE)
         end
     elseif cur_status == STATUS_ACTIVE then
         if string.sub(line, 1, #FEED_END) == FEED_END then
@@ -78,7 +87,7 @@ M.setup = function()
             M.module_handle:register_action("max", function()
                 M.module_handle:info("max action called")
                 if M.module_handle:get_status() == STATUS_ACTIVE then
-                    M.window_handle:max({ 1920, 1080 })
+                    M.window_handle:max(M.resolution)
                 end
             end)
             M.module_handle:register_action("hide", function()
