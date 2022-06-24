@@ -50,7 +50,7 @@ M.setup = function()
                 M.module_handle:info("start action called")
                 if M.module_handle:get_status() == STATUS_INACTIVE then
                     M.process_handle = M.plugin_handle:spawn_process("ssvncviewer", {
-                        args = { "-listen", "6" },
+                        args = { "-viewonly", "-listen", "6" },
                         on_output = M.handle_line,
                     })
                     M.module_handle:set_status(STATUS_WAITING)
