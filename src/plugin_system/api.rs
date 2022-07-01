@@ -6,14 +6,18 @@ use crate::window_manager::{
     ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
 };
 use ::log::{debug, error};
-use mlua::{Function, Lua, Table, UserData, UserDataMethods, Value};
+use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
-use std::io::{prelude::*, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    process::{Child, Command},
+    sync::{mpsc, Mutex},
+};
 
 #[derive(Debug)]
 struct PluginInstanceHandle {
@@ -77,17 +81,13 @@ impl PluginInstanceHandle {
         let mut command = Command::new(&cmd);
         command.args(&args).envs(&envs).stdin(Stdio::piped());
 
-        let mut output_reader = None;
         if on_output_key.is_some() {
-            let (reader, writer) = os_pipe::pipe()?;
-            let writer_clone = writer.try_clone()?;
-            command.stdout(writer).stderr(writer_clone);
-            output_reader = Some(reader);
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
 
-        let child = match command.spawn() {
+        let mut child = match command.spawn() {
             Err(e) => {
                 self.plugin_instance.error(format!(
                     "couldn't spawn process {} with args {:?} and envs {:?}: {}",
@@ -101,57 +101,107 @@ impl PluginInstanceHandle {
                     cmd,
                     args,
                     envs,
-                    c.id()
+                    c.id().unwrap()
                 ));
                 c
             }
         };
 
         if let Some(key) = on_output_key {
-            let event_sender = self.ctx.event_sender.clone();
-            let process_name = cmd.clone();
-            let plugin_instance = self.plugin_instance.clone();
-            let callback_key = Arc::new(key);
-            let pid = child.id();
-            thread::spawn(move || {
-                // We can unwrap output_reader, since we only reach this code, when on_output_key
-                // is Some.
-                let reader = BufReader::new(output_reader.unwrap());
-                for line_result in reader.lines() {
-                    match line_result {
-                        Ok(line) => {
+            async fn read_lines(
+                source: impl AsyncReadExt + Unpin,
+                event_sender: Arc<mpsc::Sender<Event>>,
+                process_name: String,
+                plugin_instance: Arc<PluginInstance>,
+                callback_key: Arc<RegistryKey>,
+                pid: u32,
+                kind: &str,
+            ) {
+                let mut lines = BufReader::new(source).lines();
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
                             let event = Event::ProcessOutput {
                                 line,
                                 process_name: process_name.clone(),
                                 plugin_instance: plugin_instance.clone(),
                                 callback_key: callback_key.clone(),
                             };
-                            if event_sender.blocking_send(event).is_err() {
-                                plugin_instance.warn(
-                                    "event receiver was dropped, couldn't send process output"
-                                        .to_string(),
-                                );
+                            if event_sender.send(event).await.is_err() {
+                                plugin_instance.warn(format!(
+                                    "event receiver was dropped, couldn't send process output ({})",
+                                    kind
+                                ));
                                 break;
                             };
                         }
+                        Ok(None) => {
+                            plugin_instance.debug(format!(
+                                "{} of process {} (PID {}) closed",
+                                kind, process_name, pid
+                            ));
+                            break;
+                        }
                         Err(e) => {
                             plugin_instance.error(format!(
-                                "error while reading stdout of process {} (PID {}): {}",
-                                process_name, pid, e
+                                "error while reading {} of process {} (PID {}): {}",
+                                kind, process_name, pid, e
                             ));
                         }
                     }
                 }
-                plugin_instance.debug(format!(
-                    "stdout and stderr for process {} (PID {}) closed",
-                    process_name, pid
-                ));
-            });
+            }
+
+            let callback_key = Arc::new(key);
+            let pid = child.id().unwrap();
+            let child_stdout = child.stdout.take().unwrap();
+            tokio::spawn(read_lines(
+                child_stdout,
+                self.ctx.event_sender.clone(),
+                cmd.clone(),
+                self.plugin_instance.clone(),
+                callback_key.clone(),
+                pid,
+                "stdout",
+            ));
+            let child_stderr = child.stderr.take().unwrap();
+            tokio::spawn(read_lines(
+                child_stderr,
+                self.ctx.event_sender.clone(),
+                cmd.clone(),
+                self.plugin_instance.clone(),
+                callback_key,
+                pid,
+                "stderr",
+            ));
         }
+
+        let child_mutex = Arc::new(Mutex::new(child));
+
+        // Shutdown handler
+        tokio::spawn({
+            let mut shutdown_receiver = self.ctx.shutdown_sender.subscribe();
+            let plugin_shutdown_wait_sender = self
+                .ctx
+                .plugin_shutdown_wait_sender
+                .upgrade()
+                .unwrap()
+                .as_ref()
+                .clone();
+            let child_mutex = child_mutex.clone();
+            async move {
+                let _ = shutdown_receiver.recv().await;
+                let mut child = child_mutex.lock().await;
+                // On ctrl-c SIGINT is sent to the child automatically so we only need to wait
+                let _ = child.wait().await;
+                drop(plugin_shutdown_wait_sender);
+            }
+        });
 
         let process_handle = ProcessHandle {
             cmd,
-            child,
+            ctx: self.ctx.clone(),
+            child: child_mutex,
             plugin_instance: self.plugin_instance.clone(),
         };
 
@@ -496,42 +546,51 @@ impl UserData for ModuleHandle {
 }
 
 struct ProcessHandle {
-    child: Child,
+    child: Arc<Mutex<Child>>,
+    ctx: Arc<LuaContext>,
     cmd: String,
     plugin_instance: Arc<PluginInstance>,
 }
 
 impl ProcessHandle {
-    fn write(&self, _lua: &Lua, buf: String) -> mlua::Result<()> {
-        self.child
-            .stdin
-            .as_ref()
-            .unwrap()
-            .write_all(buf.as_bytes())?;
+    fn write(&mut self, _lua: &Lua, buf: String) -> mlua::Result<()> {
+        self.ctx.runtime.block_on(async {
+            self.child
+                .lock()
+                .await
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(buf.as_bytes())
+                .await
+        })?;
         Ok(())
     }
 
-    fn writeln(&self, lua: &Lua, line: String) -> mlua::Result<()> {
+    fn writeln(&mut self, lua: &Lua, line: String) -> mlua::Result<()> {
         self.write(lua, line + "\n")
     }
 
     fn kill(&mut self) -> mlua::Result<()> {
-        if let Err(e) = self.child.kill() {
-            self.plugin_instance.warn(format!(
-                "Tried to to kill process {} (PID {}) which is not running: {}",
-                self.cmd,
-                self.child.id(),
-                e
-            ));
-        }
+        self.ctx.runtime.block_on(async {
+            let mut child = self.child.lock().await;
+            if let Some(pid) = child.id() {
+                if let Err(e) = child.kill().await {
+                    self.plugin_instance.warn(format!(
+                        "Tried to to kill process {} (PID {}) which is not running: {}",
+                        self.cmd, pid, e
+                    ));
+                }
+            }
+        });
         Ok(())
     }
 }
 
 impl UserData for ProcessHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("write", |lua, this, buf| this.write(lua, buf));
-        methods.add_method("writeln", |lua, this, line| this.writeln(lua, line));
+        methods.add_method_mut("write", |lua, this, buf| this.write(lua, buf));
+        methods.add_method_mut("writeln", |lua, this, line| this.writeln(lua, line));
         methods.add_method_mut("kill", |_lua, this, ()| this.kill());
     }
 }

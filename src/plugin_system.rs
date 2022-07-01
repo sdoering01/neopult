@@ -5,7 +5,8 @@ use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Display, Formatter},
-    sync::{Arc, RwLock},
+    io,
+    sync::{Arc, RwLock, Weak},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -16,10 +17,13 @@ const SEPARATOR: &str = "::";
 
 #[derive(Debug)]
 struct LuaContext {
+    runtime: tokio::runtime::Runtime,
     plugin_instances: RwLock<Vec<Arc<PluginInstance>>>,
     event_sender: Arc<mpsc::Sender<Event>>,
     notification_sender: Arc<broadcast::Sender<Notification>>,
     window_manager: RwLock<WindowManager>,
+    shutdown_sender: broadcast::Sender<()>,
+    plugin_shutdown_wait_sender: Weak<mpsc::Sender<()>>,
 }
 
 trait LogWithPrefix {
@@ -341,6 +345,8 @@ fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
 }
 
 pub fn start(
+    shutdown_tx: broadcast::Sender<()>,
+    shutdown_wait_tx: mpsc::Sender<()>,
     event_tx: mpsc::Sender<Event>,
     event_rx: mpsc::Receiver<Event>,
     notification_tx: broadcast::Sender<Notification>,
@@ -348,11 +354,21 @@ pub fn start(
 ) -> anyhow::Result<()> {
     let lua = Lua::new();
 
+    let (plugin_shutdown_wait_sender, plugin_shutdown_wait_receiver) = mpsc::channel::<()>(1);
+    let plugin_shutdown_wait_sender = Arc::new(plugin_shutdown_wait_sender);
+
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+
     let ctx = Arc::new(LuaContext {
+        runtime,
         plugin_instances: RwLock::new(Vec::new()),
         event_sender: Arc::new(event_tx),
         window_manager: RwLock::new(window_manager),
         notification_sender: Arc::new(notification_tx),
+        shutdown_sender: shutdown_tx,
+        // The context must not own the plugin shutdown wait sender because we won't be able to drop
+        // every context reference on shutdown.
+        plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
     });
 
     let globals = lua.globals();
@@ -374,72 +390,120 @@ pub fn start(
 
     info!("plugins loaded");
 
-    event_loop(&lua, ctx, event_rx);
+    event_loop(
+        &lua,
+        ctx,
+        event_rx,
+        plugin_shutdown_wait_receiver,
+        plugin_shutdown_wait_sender,
+    )?;
+    drop(shutdown_wait_tx);
 
     Ok(())
 }
 
-fn event_loop(lua: &Lua, ctx: Arc<LuaContext>, mut event_receiver: mpsc::Receiver<Event>) {
+fn event_loop(
+    lua: &Lua,
+    ctx: Arc<LuaContext>,
+    mut event_receiver: mpsc::Receiver<Event>,
+    mut plugin_shutdown_wait_receiver: mpsc::Receiver<()>,
+    plugin_shutdown_wait_sender: Arc<mpsc::Sender<()>>,
+) -> io::Result<()> {
+    let mut shutdown_receiver = ctx.shutdown_sender.subscribe();
+
     info!("starting event loop");
 
-    while let Some(event) = event_receiver.blocking_recv() {
-        match event {
-            Event::CliCommand {
-                command,
-                reply_sender,
-            } => {
-                if command == "actions" {
-                    let actions = list_actions(&ctx);
-                    let reply = actions.join("\n");
-                    let _ = reply_sender.send(reply);
-                } else if command == "statuses" {
-                    let statuses = list_statuses(&ctx);
-                    let reply = statuses.join("\n");
-                    let _ = reply_sender.send(reply);
-                } else if let Some(identifier) = command.strip_prefix("call ") {
-                    match call_action_string(lua, &ctx, identifier) {
-                        Ok(_) => {
-                            let _ = reply_sender.send("action called successfully".to_string());
-                        }
-                        Err(e) => {
-                            let _ =
-                                reply_sender.send(format!("error when calling action: {:?}", e));
-                        }
+    let mut should_shutdown = false;
+    loop {
+        let event_option = ctx.runtime.block_on({
+            async {
+                tokio::select!(
+                    event_option = event_receiver.recv() => event_option,
+                    _ = shutdown_receiver.recv() => {
+                        should_shutdown = true;
+                        None
                     }
-                } else {
-                    let _ = reply_sender.send(format!("unknown command: {}", command));
-                }
+                )
             }
-            Event::ProcessOutput {
-                line,
-                process_name,
-                plugin_instance,
-                callback_key,
-            } => {
-                if let Ok(callback) = lua.registry_value::<Function>(&callback_key) {
-                    if let Err(e) = callback.call::<_, Value>(line) {
-                        plugin_instance.error(format!(
-                            "error when handling callback for process {}: {:?}",
-                            process_name, e
-                        ));
+        });
+
+        // Handling the event must happen outside of the async runtime, so that non-async rust
+        // functions that are called from lua can call `block_on` on the runtime.
+        match event_option {
+            Some(event) => handle_event(lua, &ctx, event),
+            None => break,
+        };
+    }
+
+    if should_shutdown {
+        ctx.runtime.block_on(async {
+            // Drop sender at the latest possible time so Arc upgrades are possible
+            drop(plugin_shutdown_wait_sender);
+            debug!("Waiting for plugin system shutdown");
+            let _ = plugin_shutdown_wait_receiver.recv().await;
+            debug!("Plugin system shut down");
+        });
+    }
+
+    Ok(())
+}
+
+fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {
+    match event {
+        Event::CliCommand {
+            command,
+            reply_sender,
+        } => {
+            if command == "actions" {
+                let actions = list_actions(&ctx);
+                let reply = actions.join("\n");
+                let _ = reply_sender.send(reply);
+            } else if command == "statuses" {
+                let statuses = list_statuses(&ctx);
+                let reply = statuses.join("\n");
+                let _ = reply_sender.send(reply);
+            } else if let Some(identifier) = command.strip_prefix("call ") {
+                match call_action_string(lua, &ctx, identifier) {
+                    Ok(_) => {
+                        let _ = reply_sender.send("action called successfully".to_string());
+                    }
+                    Err(e) => {
+                        let _ = reply_sender.send(format!("error when calling action: {:?}", e));
                     }
                 }
+            } else {
+                let _ = reply_sender.send(format!("unknown command: {}", command));
             }
-            Event::FetchSystemInfo { reply_sender } => {
-                let system_info = system_info(&ctx);
-                if reply_sender.send(system_info).is_err() {
-                    warn!("fetch system info: reply receiver was closed");
-                }
-            }
-            Event::ClientCommand(cmd) => match cmd {
-                ClientCommand::CallAction {
-                    identifier,
-                    error_sender,
-                } => {
-                    let call_result = call_action(&lua, &ctx, identifier);
-                    let _ = error_sender.send(call_result);
-                }
-            },
         }
+        Event::ProcessOutput {
+            line,
+            process_name,
+            plugin_instance,
+            callback_key,
+        } => {
+            if let Ok(callback) = lua.registry_value::<Function>(&callback_key) {
+                if let Err(e) = callback.call::<_, Value>(line) {
+                    plugin_instance.error(format!(
+                        "error when handling callback for process {}: {:?}",
+                        process_name, e
+                    ));
+                }
+            }
+        }
+        Event::FetchSystemInfo { reply_sender } => {
+            let system_info = system_info(&ctx);
+            if reply_sender.send(system_info).is_err() {
+                warn!("fetch system info: reply receiver was closed");
+            }
+        }
+        Event::ClientCommand(cmd) => match cmd {
+            ClientCommand::CallAction {
+                identifier,
+                error_sender,
+            } => {
+                let call_result = call_action(&lua, &ctx, identifier);
+                let _ = error_sender.send(call_result);
+            }
+        },
     }
 }
