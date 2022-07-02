@@ -575,11 +575,14 @@ impl ProcessHandle {
         self.ctx.runtime.block_on(async {
             let mut child = self.child.lock().await;
             if let Some(pid) = child.id() {
-                if let Err(e) = child.kill().await {
-                    self.plugin_instance.warn(format!(
+                match child.kill().await {
+                    Ok(_) => {
+                        let _ = child.wait().await;
+                    }
+                    Err(e) => self.plugin_instance.warn(format!(
                         "Tried to to kill process {} (PID {}) which is not running: {}",
                         self.cmd, pid, e
-                    ));
+                    )),
                 }
             }
         });
