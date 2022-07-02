@@ -10,15 +10,21 @@ use axum::{
     Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::{io, net::SocketAddr, sync::Arc};
-use tokio::sync::{
-    broadcast::{self, error::RecvError},
-    mpsc, oneshot,
+use tokio::{
+    sync::{
+        broadcast::{self, error::RecvError},
+        mpsc, oneshot,
+    },
+    time::{self, Duration, Instant},
 };
 use tower_http::services::ServeDir;
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 struct WebContext {
@@ -64,6 +70,8 @@ enum FromServerError {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum FromServer {
+    Ping,
+    Pong,
     SystemInfo(SystemInfo),
     Notification(Notification),
     Response(ServerResponse),
@@ -71,9 +79,17 @@ enum FromServer {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct FromClient {
+struct ClientRequest {
     request_id: String,
     body: FromClientBody,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FromClient {
+    Ping,
+    Pong,
+    Request(ClientRequest),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -93,9 +109,7 @@ pub async fn start(
 
     let app = Router::new()
         .route("/ws", get(websocket_handler))
-        .fallback(
-            get_service(ServeDir::new("web")).handle_error(handle_error),
-        )
+        .fallback(get_service(ServeDir::new("web")).handle_error(handle_error))
         .layer(Extension(ctx));
     let addr = SocketAddr::from(([0, 0, 0, 0], 4200));
     info!("starting server on {}", addr);
@@ -139,8 +153,22 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
         return;
     }
 
+    let mut hb = Instant::now();
+    let mut hb_interval = time::interval(HEARTBEAT_INTERVAL);
+
     loop {
         tokio::select!(
+            _ = hb_interval.tick() => {
+                if Instant::now().duration_since(hb) > CLIENT_TIMEOUT {
+                    debug!("client timed out");
+                    break;
+                }
+
+                let json = serde_json::to_string(&FromServer::Ping).expect("serialization failed");
+                if sender.send(Message::Text(json)).await.is_err() {
+                    break;
+                }
+            },
             notification_result = notification_receiver.recv() => {
                 let notification = match notification_result {
                     Ok(n) => n,
@@ -179,35 +207,48 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
                                 continue;
                             }
                         };
-
-                        let request_id = client_msg.request_id;
-
-                        match client_msg.body {
-                            FromClientBody::CallAction(identifier) => {
-                                let (tx, rx) = oneshot::channel();
-                                let command = ClientCommand::CallAction {
-                                    identifier: identifier.clone(),
-                                    error_sender: tx
-                                };
-                                send_client_command(&event_sender, command).await;
-
-                                let response = match rx.await {
-                                    Ok(Ok(_)) => ServerResponse::new_success(request_id),
-                                    Ok(Err(e)) => {
-                                        error!("error when calling action {}: {:?}", identifier, e);
-                                        ServerResponse::from_error(request_id, e)
-                                    },
-                                    Err(_) => {
-                                        error!("plugin system didn't reply to call action command");
-                                        ServerResponse::new_internal_error(request_id)
-                                    },
-                                };
-                                let json = serde_json::to_string(&FromServer::Response(response)).expect("serialization failed");
+                        match client_msg {
+                            FromClient::Ping => {
+                                hb = Instant::now();
+                                let json = serde_json::to_string(&FromServer::Pong).expect("serialization failed");
                                 if sender.send(Message::Text(json)).await.is_err() {
                                     break;
                                 }
                             },
-                        };
+                            FromClient::Pong => {
+                                hb = Instant::now();
+                            },
+                            FromClient::Request(request) => {
+                                let request_id = request.request_id;
+
+                                match request.body {
+                                    FromClientBody::CallAction(identifier) => {
+                                        let (tx, rx) = oneshot::channel();
+                                        let command = ClientCommand::CallAction {
+                                            identifier: identifier.clone(),
+                                            error_sender: tx
+                                        };
+                                        send_client_command(&event_sender, command).await;
+
+                                        let response = match rx.await {
+                                            Ok(Ok(_)) => ServerResponse::new_success(request_id),
+                                            Ok(Err(e)) => {
+                                                error!("error when calling action {}: {:?}", identifier, e);
+                                                ServerResponse::from_error(request_id, e)
+                                            },
+                                            Err(_) => {
+                                                error!("plugin system didn't reply to call action command");
+                                                ServerResponse::new_internal_error(request_id)
+                                            },
+                                        };
+                                        let json = serde_json::to_string(&FromServer::Response(response)).expect("serialization failed");
+                                        if sender.send(Message::Text(json)).await.is_err() {
+                                            break;
+                                        }
+                                    },
+                                };
+                            }
+                        }
                     }
                     _ => {
                         break;

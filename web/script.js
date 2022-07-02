@@ -9,12 +9,14 @@ const moduleMessageElements = {};
 
 const callAction = (pluginInstance, module, action) => {
     const request = {
-        request_id: requestId.toString(),
-        body: {
-            call_action: {
-                plugin_instance: pluginInstance,
-                module,
-                action,
+        request: {
+            request_id: requestId.toString(),
+            body: {
+                call_action: {
+                    plugin_instance: pluginInstance,
+                    module,
+                    action,
+                },
             },
         },
     };
@@ -25,6 +27,10 @@ const callAction = (pluginInstance, module, action) => {
 
 socket.addEventListener('open', () => {
     console.log('socket open');
+});
+
+socket.addEventListener('error', (event) => {
+    console.log('socket error', event);
 });
 
 socket.addEventListener('message', (event) => {
@@ -38,7 +44,12 @@ socket.addEventListener('message', (event) => {
         return;
     }
 
-    if (msg.system_info) {
+    if (msg == 'ping') {
+        // TODO: Set heartbeat
+        socket.send('"pong"');
+    } else if (msg == 'pong') {
+        // TODO: Set heartbeat
+    } else if (msg.system_info) {
         const containerEl = document.createElement('div');
         containerEl.classList.add('modules');
         for (const pluginInstance of msg.system_info.plugin_instances) {
