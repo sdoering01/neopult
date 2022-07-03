@@ -22,10 +22,6 @@ local function generate_sender_message(sender_link)
     return "follow <a href=\"" .. sender_link .. "\" target=\"_blank\">this link</a> to the camera sender"
 end
 
-local function handle_output(line)
-    M.plugin_handle:info("camera server output line " .. line)
-end
-
 local function handle_notify(line)
     M.plugin_handle:info("camera server notify line " .. line)
     local space = string.find(line, ' ')
@@ -92,7 +88,6 @@ M.setup = function(args)
         M.camera_server_handle = M.plugin_handle:spawn_process("node", {
             args = { args.camera_server_path },
             envs = { CONFIG_PATH = "./plugins/cvh_camera/config.json" },
-            on_output = handle_output
         })
 
         if not M.camera_server_handle then

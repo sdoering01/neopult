@@ -78,16 +78,15 @@ impl PluginInstanceHandle {
             }
         }
 
-        let mut command = Command::new(&cmd);
-        command.args(&args).envs(&envs).stdin(Stdio::piped());
+        let child_result = Command::new(&cmd)
+            .args(&args)
+            .envs(&envs)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
 
-        if on_output_key.is_some() {
-            command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        } else {
-            command.stdout(Stdio::null()).stderr(Stdio::null());
-        }
-
-        let mut child = match command.spawn() {
+        let mut child = match child_result {
             Err(e) => {
                 self.plugin_instance.error(format!(
                     "couldn't spawn process {} with args {:?} and envs {:?}: {}",
@@ -107,25 +106,29 @@ impl PluginInstanceHandle {
             }
         };
 
-        if let Some(key) = on_output_key {
-            async fn read_lines(
-                source: impl AsyncReadExt + Unpin,
-                event_sender: Arc<mpsc::Sender<Event>>,
-                process_name: String,
-                plugin_instance: Arc<PluginInstance>,
-                callback_key: Arc<RegistryKey>,
-                pid: u32,
-                kind: &str,
-            ) {
-                let mut lines = BufReader::new(source).lines();
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
+        async fn read_lines(
+            source: impl AsyncReadExt + Unpin,
+            event_sender: Arc<mpsc::Sender<Event>>,
+            process_name: String,
+            plugin_instance: Arc<PluginInstance>,
+            callback_key: Option<Arc<RegistryKey>>,
+            pid: u32,
+            kind: &str,
+        ) {
+            let mut lines = BufReader::new(source).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        plugin_instance.debug(format!(
+                            "process {} (PID {}) {} line: {}",
+                            process_name, pid, kind, line
+                        ));
+                        if let Some(key) = callback_key.as_ref() {
                             let event = Event::ProcessOutput {
                                 line,
                                 process_name: process_name.clone(),
                                 plugin_instance: plugin_instance.clone(),
-                                callback_key: callback_key.clone(),
+                                callback_key: key.clone(),
                             };
                             if event_sender.send(event).await.is_err() {
                                 plugin_instance.warn(format!(
@@ -135,46 +138,46 @@ impl PluginInstanceHandle {
                                 break;
                             };
                         }
-                        Ok(None) => {
-                            plugin_instance.debug(format!(
-                                "{} of process {} (PID {}) closed",
-                                kind, process_name, pid
-                            ));
-                            break;
-                        }
-                        Err(e) => {
-                            plugin_instance.error(format!(
-                                "error while reading {} of process {} (PID {}): {}",
-                                kind, process_name, pid, e
-                            ));
-                        }
+                    }
+                    Ok(None) => {
+                        plugin_instance.debug(format!(
+                            "{} of process {} (PID {}) closed",
+                            kind, process_name, pid
+                        ));
+                        break;
+                    }
+                    Err(e) => {
+                        plugin_instance.error(format!(
+                            "error while reading {} of process {} (PID {}): {}",
+                            kind, process_name, pid, e
+                        ));
                     }
                 }
             }
-
-            let callback_key = Arc::new(key);
-            let pid = child.id().unwrap();
-            let child_stdout = child.stdout.take().unwrap();
-            tokio::spawn(read_lines(
-                child_stdout,
-                self.ctx.event_sender.clone(),
-                cmd.clone(),
-                self.plugin_instance.clone(),
-                callback_key.clone(),
-                pid,
-                "stdout",
-            ));
-            let child_stderr = child.stderr.take().unwrap();
-            tokio::spawn(read_lines(
-                child_stderr,
-                self.ctx.event_sender.clone(),
-                cmd.clone(),
-                self.plugin_instance.clone(),
-                callback_key,
-                pid,
-                "stderr",
-            ));
         }
+
+        let callback_key = on_output_key.and_then(|key| Some(Arc::new(key)));
+        let pid = child.id().unwrap();
+        let child_stdout = child.stdout.take().unwrap();
+        tokio::spawn(read_lines(
+            child_stdout,
+            self.ctx.event_sender.clone(),
+            cmd.clone(),
+            self.plugin_instance.clone(),
+            callback_key.clone(),
+            pid,
+            "stdout",
+        ));
+        let child_stderr = child.stderr.take().unwrap();
+        tokio::spawn(read_lines(
+            child_stderr,
+            self.ctx.event_sender.clone(),
+            cmd.clone(),
+            self.plugin_instance.clone(),
+            callback_key,
+            pid,
+            "stderr",
+        ));
 
         let child_mutex = Arc::new(Mutex::new(child));
 
