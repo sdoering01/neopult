@@ -1,240 +1,244 @@
-// NOTE: Make sure to adjust the timeout when changing the ping interval on the server
-const CONNECTION_TIMEOUT_MS = 10000;
-const RECONNECT_INTERVALS_MS = [1000, 3000, 10000];
+(() => {
+    'use strict';
 
-const RECONNECT_LABEL_INITIAL = 'Connect';
-const RECONNECT_LABEL = 'Reconnect';
+    // NOTE: Make sure to adjust the timeout when changing the ping interval on the server
+    const CONNECTION_TIMEOUT_MS = 10000;
+    const RECONNECT_INTERVALS_MS = [1000, 3000, 10000];
 
-let initialConnect = true;
-let reconnecting = false;
-let heartbeatTimeout;
-let reconnectTry;
-let reconnectTimeout;
-let reconnectUpdateInterval;
+    const RECONNECT_LABEL_INITIAL = 'Connect';
+    const RECONNECT_LABEL = 'Reconnect';
 
-const socketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
-const socketAddress = `${socketProtocol}//${window.location.host}/ws`;
-let socket;
+    let initialConnect = true;
+    let reconnecting = false;
+    let heartbeatTimeout;
+    let reconnectTry;
+    let reconnectTimeout;
+    let reconnectUpdateInterval;
 
-let requestId = 1;
+    const socketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
+    const socketAddress = `${socketProtocol}//${window.location.host}/ws`;
+    let socket;
 
-const appContainerEl = document.getElementById('app');
-const statusEl = document.getElementById('status');
-const reconnectButtonEl = document.getElementById('reconnect-button');
-const moduleStatusElements = {};
-const moduleMessageElements = {};
+    let requestId = 1;
 
-const heartbeat = () => {
-    clearTimeout(heartbeatTimeout);
-    heartbeatTimeout = setTimeout(() => {
-        console.log('connection timed out');
-        disconnect();
-    }, CONNECTION_TIMEOUT_MS);
-};
+    const appContainerEl = document.getElementById('app');
+    const statusEl = document.getElementById('status');
+    const reconnectButtonEl = document.getElementById('reconnect-button');
+    const moduleStatusElements = {};
+    const moduleMessageElements = {};
 
-const cancelHeartbeat = () => {
-    clearTimeout(heartbeatTimeout);
-};
+    const heartbeat = () => {
+        clearTimeout(heartbeatTimeout);
+        heartbeatTimeout = setTimeout(() => {
+            console.log('connection timed out');
+            disconnect();
+        }, CONNECTION_TIMEOUT_MS);
+    };
 
-const callAction = (pluginInstance, module, action) => {
-    const request = {
-        request: {
-            request_id: requestId.toString(),
-            body: {
-                call_action: {
-                    plugin_instance: pluginInstance,
-                    module,
-                    action,
+    const cancelHeartbeat = () => {
+        clearTimeout(heartbeatTimeout);
+    };
+
+    const callAction = (pluginInstance, module, action) => {
+        const request = {
+            request: {
+                request_id: requestId.toString(),
+                body: {
+                    call_action: {
+                        plugin_instance: pluginInstance,
+                        module,
+                        action,
+                    },
                 },
             },
-        },
+        };
+        requestId++;
+        const json = JSON.stringify(request);
+        socket.send(json);
     };
-    requestId++;
-    const json = JSON.stringify(request);
-    socket.send(json);
-};
 
-const connect = () => {
-    console.log('connect');
-    socket = new WebSocket(socketAddress);
+    const connect = () => {
+        console.log('connect');
+        socket = new WebSocket(socketAddress);
 
-    socket.addEventListener('open', handleSocketOpen);
-    socket.addEventListener('error', handleSocketError);
-    socket.addEventListener('close', handleSocketClose);
-    socket.addEventListener('message', handleSocketMessage);
-};
+        socket.addEventListener('open', handleSocketOpen);
+        socket.addEventListener('error', handleSocketError);
+        socket.addEventListener('close', handleSocketClose);
+        socket.addEventListener('message', handleSocketMessage);
+    };
 
-const handleSocketOpen = (event) => {
-    console.log('socket open', event);
-    reconnecting = false;
-    initialConnect = false;
-    clearTimeout(reconnectTimeout);
-    clearInterval(reconnectUpdateInterval);
-    reconnectButtonEl.classList.add('hidden');
-    statusEl.innerText = 'Loading server state';
-};
+    const handleSocketOpen = (event) => {
+        console.log('socket open', event);
+        reconnecting = false;
+        initialConnect = false;
+        clearTimeout(reconnectTimeout);
+        clearInterval(reconnectUpdateInterval);
+        reconnectButtonEl.classList.add('hidden');
+        statusEl.innerText = 'Loading server state';
+    };
 
-const handleSocketMessage = (event) => {
-    console.log('socket message', event.data);
+    const handleSocketMessage = (event) => {
+        console.log('socket message', event.data);
 
-    let msg;
-    try {
-        msg = JSON.parse(event.data);
-    } catch (e) {
-        console.error('parse error:', e);
-        return;
-    }
+        let msg;
+        try {
+            msg = JSON.parse(event.data);
+        } catch (e) {
+            console.error('parse error:', e);
+            return;
+        }
 
-    if (msg == 'ping') {
-        heartbeat();
-        socket.send('"pong"');
-    } else if (msg == 'pong') {
-        heartbeat();
-    } else if (msg.system_info) {
-        const containerEl = document.createElement('div');
-        containerEl.classList.add('modules');
-        for (const pluginInstance of msg.system_info.plugin_instances) {
-            for (const module of pluginInstance.modules) {
-                const moduleIdentifier = `${pluginInstance.name}::${module.name}`;
+        if (msg == 'ping') {
+            heartbeat();
+            socket.send('"pong"');
+        } else if (msg == 'pong') {
+            heartbeat();
+        } else if (msg.system_info) {
+            const containerEl = document.createElement('div');
+            containerEl.classList.add('modules');
+            for (const pluginInstance of msg.system_info.plugin_instances) {
+                for (const module of pluginInstance.modules) {
+                    const moduleIdentifier = `${pluginInstance.name}::${module.name}`;
 
-                const moduleContainerEl = document.createElement('div');
-                moduleContainerEl.classList.add('module-container');
-                containerEl.appendChild(moduleContainerEl);
+                    const moduleContainerEl = document.createElement('div');
+                    moduleContainerEl.classList.add('module-container');
+                    containerEl.appendChild(moduleContainerEl);
 
-                const moduleInfoEl = document.createElement('div');
-                moduleInfoEl.classList.add('module-info');
-                moduleContainerEl.appendChild(moduleInfoEl);
+                    const moduleInfoEl = document.createElement('div');
+                    moduleInfoEl.classList.add('module-info');
+                    moduleContainerEl.appendChild(moduleInfoEl);
 
-                const moduleNameEl = document.createElement('span');
-                moduleNameEl.innerText = module.name;
-                moduleNameEl.classList.add('module-info__name');
-                moduleInfoEl.appendChild(moduleNameEl);
+                    const moduleNameEl = document.createElement('span');
+                    moduleNameEl.innerText = module.name;
+                    moduleNameEl.classList.add('module-info__name');
+                    moduleInfoEl.appendChild(moduleNameEl);
 
-                const moduleStatusEl = document.createElement('span');
-                moduleStatusEl.innerText = module.status;
-                moduleStatusEl.classList.add('module-info__status');
-                moduleStatusElements[moduleIdentifier] = moduleStatusEl;
-                moduleInfoEl.appendChild(moduleStatusEl);
+                    const moduleStatusEl = document.createElement('span');
+                    moduleStatusEl.innerText = module.status;
+                    moduleStatusEl.classList.add('module-info__status');
+                    moduleStatusElements[moduleIdentifier] = moduleStatusEl;
+                    moduleInfoEl.appendChild(moduleStatusEl);
 
-                const moduleActionsEl = document.createElement('div');
-                moduleActionsEl.classList.add('module-actions');
-                moduleContainerEl.appendChild(moduleActionsEl);
-                for (const action of module.actions) {
-                    const actionButtonEl = document.createElement('button');
-                    actionButtonEl.classList.add('action-button');
-                    actionButtonEl.innerText = action;
-                    actionButtonEl.onclick = () => {
-                        console.log(`call ${moduleIdentifier}::${action}`);
-                        callAction(pluginInstance.name, module.name, action);
-                    };
-                    moduleActionsEl.appendChild(actionButtonEl);
+                    const moduleActionsEl = document.createElement('div');
+                    moduleActionsEl.classList.add('module-actions');
+                    moduleContainerEl.appendChild(moduleActionsEl);
+                    for (const action of module.actions) {
+                        const actionButtonEl = document.createElement('button');
+                        actionButtonEl.classList.add('action-button');
+                        actionButtonEl.innerText = action;
+                        actionButtonEl.onclick = () => {
+                            console.log(`call ${moduleIdentifier}::${action}`);
+                            callAction(pluginInstance.name, module.name, action);
+                        };
+                        moduleActionsEl.appendChild(actionButtonEl);
+                    }
+
+                    const moduleMessageEl = document.createElement('div');
+                    moduleMessageEl.classList.add('module-message');
+                    if (module.message) {
+                        moduleMessageEl.innerHTML = module.message;
+                    }
+                    moduleMessageElements[moduleIdentifier] = moduleMessageEl;
+                    moduleContainerEl.appendChild(moduleMessageEl);
                 }
-
-                const moduleMessageEl = document.createElement('div');
-                moduleMessageEl.classList.add('module-message');
-                if (module.message) {
-                    moduleMessageEl.innerHTML = module.message;
-                }
-                moduleMessageElements[moduleIdentifier] = moduleMessageEl;
-                moduleContainerEl.appendChild(moduleMessageEl);
+            }
+            appContainerEl.innerHTML = '';
+            appContainerEl.appendChild(containerEl);
+            statusEl.innerText = 'Connected';
+        } else if (msg.notification) {
+            const notification = msg.notification;
+            if (notification.module_status_update) {
+                const update = notification.module_status_update;
+                const identifier = `${update.plugin_instance}::${update.module}`;
+                moduleStatusElements[identifier].innerText = update.new_status;
+            } else if (notification.module_message_update) {
+                const update = notification.module_message_update;
+                const identifier = `${update.plugin_instance}::${update.module}`;
+                moduleMessageElements[identifier].innerHTML = update.new_message;
             }
         }
+    };
+
+    const handleSocketError = (event) => {
+        console.log('socket error', event);
+    };
+
+    const handleSocketClose = (event) => {
+        console.log('socket close', event);
+        handleDisconnect();
+    };
+
+    const disconnect = () => {
+        socket.close();
+        handleDisconnect();
+    };
+
+    const handleDisconnect = () => {
+        socket.removeEventListener('open', handleSocketOpen);
+        socket.removeEventListener('error', handleSocketError);
+        socket.removeEventListener('close', handleSocketClose);
+        socket.removeEventListener('message', handleSocketMessage);
+
         appContainerEl.innerHTML = '';
-        appContainerEl.appendChild(containerEl);
-        statusEl.innerText = 'Connected';
-    } else if (msg.notification) {
-        const notification = msg.notification;
-        if (notification.module_status_update) {
-            const update = notification.module_status_update;
-            const identifier = `${update.plugin_instance}::${update.module}`;
-            moduleStatusElements[identifier].innerText = update.new_status;
-        } else if (notification.module_message_update) {
-            const update = notification.module_message_update;
-            const identifier = `${update.plugin_instance}::${update.module}`;
-            moduleMessageElements[identifier].innerHTML = update.new_message;
+        cancelHeartbeat();
+
+        if (initialConnect) {
+            statusEl.innerText = 'Connection failed';
+        } else {
+            statusEl.innerText = 'Disconnected';
         }
-    }
-};
 
-const handleSocketError = (event) => {
-    console.log('socket error', event);
-};
+        if (reconnecting) {
+            reconnecting = false;
+            scheduleReconnect();
+        } else {
+            initReconnect();
+        }
+    };
 
-const handleSocketClose = (event) => {
-    console.log('socket close', event);
-    handleDisconnect();
-};
+    const reconnect = () => {
+        // For manual reconnecting
+        clearTimeout(reconnectTimeout);
+        clearInterval(reconnectUpdateInterval);
+        if (initialConnect) {
+            statusEl.innerText = 'Connecting';
+        } else {
+            statusEl.innerText = 'Reconnecting';
+        }
+        reconnecting = true;
+        reconnectButtonEl.classList.add('hidden');
+        connect();
+    };
 
-const disconnect = () => {
-    socket.close();
-    handleDisconnect();
-};
+    const updateReconnectButton = (millis) => {
+        let label = initialConnect ? RECONNECT_LABEL_INITIAL : RECONNECT_LABEL;
+        let secs = Math.ceil(millis / 1000);
+        reconnectButtonEl.innerText = `${label} (retrying in ${secs})`;
+    };
 
-const handleDisconnect = () => {
-    socket.removeEventListener('open', handleSocketOpen);
-    socket.removeEventListener('error', handleSocketError);
-    socket.removeEventListener('close', handleSocketClose);
-    socket.removeEventListener('message', handleSocketMessage);
-
-    appContainerEl.innerHTML = '';
-    cancelHeartbeat();
-
-    if (initialConnect) {
-        statusEl.innerText = 'Connection failed';
-    } else {
-        statusEl.innerText = 'Disconnected';
-    }
-
-    if (reconnecting) {
-        reconnecting = false;
-        scheduleReconnect();
-    } else {
-        initReconnect();
-    }
-};
-
-const reconnect = () => {
-    // For manual reconnecting
-    clearTimeout(reconnectTimeout);
-    clearInterval(reconnectUpdateInterval);
-    if (initialConnect) {
-        statusEl.innerText = 'Connecting';
-    } else {
-        statusEl.innerText = 'Reconnecting';
-    }
-    reconnecting = true;
-    reconnectButtonEl.classList.add('hidden');
-    connect();
-};
-
-const updateReconnectButton = (millis) => {
-    let label = initialConnect ? RECONNECT_LABEL_INITIAL : RECONNECT_LABEL;
-    let secs = Math.ceil(millis / 1000);
-    reconnectButtonEl.innerText = `${label} (retrying in ${secs})`;
-};
-
-const scheduleReconnect = () => {
-    reconnectButtonEl.classList.remove('hidden');
-    reconnectTry++;
-    let reconnectIntervalIdx = reconnectTry - 1;
-    if (reconnectIntervalIdx >= RECONNECT_INTERVALS_MS.length) {
-        reconnectIntervalIdx = RECONNECT_INTERVALS_MS.length - 1;
-    }
-    let reconnectIn = RECONNECT_INTERVALS_MS[reconnectIntervalIdx];
-    reconnectTimeout = setTimeout(reconnect, reconnectIn);
-    updateReconnectButton(reconnectIn);
-    reconnectUpdateInterval = setInterval(() => {
-        reconnectIn -= 1000;
+    const scheduleReconnect = () => {
+        reconnectButtonEl.classList.remove('hidden');
+        reconnectTry++;
+        let reconnectIntervalIdx = reconnectTry - 1;
+        if (reconnectIntervalIdx >= RECONNECT_INTERVALS_MS.length) {
+            reconnectIntervalIdx = RECONNECT_INTERVALS_MS.length - 1;
+        }
+        let reconnectIn = RECONNECT_INTERVALS_MS[reconnectIntervalIdx];
+        reconnectTimeout = setTimeout(reconnect, reconnectIn);
         updateReconnectButton(reconnectIn);
-    }, 1000);
-};
+        reconnectUpdateInterval = setInterval(() => {
+            reconnectIn -= 1000;
+            updateReconnectButton(reconnectIn);
+        }, 1000);
+    };
 
-const initReconnect = () => {
-    reconnectTry = 0;
-    scheduleReconnect();
-};
+    const initReconnect = () => {
+        reconnectTry = 0;
+        scheduleReconnect();
+    };
 
-reconnectButtonEl.addEventListener('click', reconnect);
+    reconnectButtonEl.addEventListener('click', reconnect);
 
-statusEl.innerText = 'Connecting';
-connect();
+    statusEl.innerText = 'Connecting';
+    connect();
+})();
