@@ -23,6 +23,7 @@ use tokio::{
 };
 use tower_http::services::ServeDir;
 
+// NOTE: Make sure to adjust the values in the client accordingly
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 

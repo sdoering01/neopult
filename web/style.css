@@ -1,3 +1,22 @@
+*,
+::after,
+::before {
+    box-sizing: border-box;
+}
+
+#main-header {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: center;
+    height: 24px;
+    margin-bottom: 8px;
+}
+
+.hidden {
+    display: none;
+}
+
 .modules {
     display: flex;
     flex-direction: column;
