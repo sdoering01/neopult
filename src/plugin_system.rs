@@ -110,13 +110,15 @@ pub enum Notification {
 pub struct PluginInstance {
     name: String,
     modules: RwLock<Vec<Arc<Module>>>,
+    on_cleanup: Option<RegistryKey>,
 }
 
 impl PluginInstance {
-    fn new(name: String) -> Self {
+    fn new(name: String, on_cleanup: Option<RegistryKey>) -> Self {
         Self {
             name,
             modules: RwLock::new(Vec::new()),
+            on_cleanup,
         }
     }
 }
@@ -413,14 +415,12 @@ fn event_loop(
 
     info!("starting event loop");
 
-    let mut should_shutdown = false;
     loop {
         let event_option = ctx.runtime.block_on({
             async {
                 tokio::select!(
                     event_option = event_receiver.recv() => event_option,
                     _ = shutdown_receiver.recv() => {
-                        should_shutdown = true;
                         None
                     }
                 )
@@ -435,15 +435,37 @@ fn event_loop(
         };
     }
 
-    if should_shutdown {
-        ctx.runtime.block_on(async {
-            // Drop sender at the latest possible time so Arc upgrades are possible
-            drop(plugin_shutdown_wait_sender);
-            debug!("Waiting for plugin system shutdown");
-            let _ = plugin_shutdown_wait_receiver.recv().await;
-            debug!("Plugin system shut down");
+    info!("event loop finished");
+    debug!("running plugin instance cleanup callbacks");
+
+    ctx.plugin_instances
+        .read()
+        .unwrap()
+        .iter()
+        .for_each(|plugin_instance| {
+            if let Some(ref callback_key) = plugin_instance.on_cleanup {
+                match lua.registry_value::<Function>(callback_key) {
+                    Ok(callback) => {
+                        if let Err(e) = callback.call::<_, Value>(()) {
+                            plugin_instance
+                                .error(format!("error when calling cleanup callback: {:?}", e));
+                        }
+                    }
+                    Err(e) => {
+                        plugin_instance
+                            .error(format!("error when retreiving cleanup callback. {:?}", e));
+                    }
+                }
+            }
         });
-    }
+
+    ctx.runtime.block_on(async {
+        // Drop sender at the latest possible time so Arc upgrades are possible
+        drop(plugin_shutdown_wait_sender);
+        debug!("Waiting for plugin system shutdown");
+        let _ = plugin_shutdown_wait_receiver.recv().await;
+        debug!("Plugin system shut down");
+    });
 
     Ok(())
 }

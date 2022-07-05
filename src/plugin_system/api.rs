@@ -86,6 +86,7 @@ impl PluginInstanceHandle {
             .stderr(Stdio::piped())
             .spawn();
 
+        let pid;
         let mut child = match child_result {
             Err(e) => {
                 self.plugin_instance.error(format!(
@@ -95,12 +96,10 @@ impl PluginInstanceHandle {
                 return Ok(Value::Nil);
             }
             Ok(c) => {
+                pid = c.id().unwrap();
                 self.plugin_instance.debug(format!(
                     "spawned process {} with args {:?} and envs {:?} (PID {})",
-                    cmd,
-                    args,
-                    envs,
-                    c.id().unwrap()
+                    cmd, args, envs, pid,
                 ));
                 c
             }
@@ -157,7 +156,6 @@ impl PluginInstanceHandle {
         }
 
         let callback_key = on_output_key.and_then(|key| Some(Arc::new(key)));
-        let pid = child.id().unwrap();
         let child_stdout = child.stdout.take().unwrap();
         tokio::spawn(read_lines(
             child_stdout,
@@ -564,14 +562,15 @@ struct ProcessHandle {
 impl ProcessHandle {
     fn write(&mut self, _lua: &Lua, buf: String) -> mlua::Result<()> {
         self.ctx.runtime.block_on(async {
-            self.child
-                .lock()
-                .await
-                .stdin
-                .as_mut()
-                .unwrap()
-                .write_all(buf.as_bytes())
-                .await
+            if let Some(stdin) = self.child.lock().await.stdin.as_mut() {
+                stdin.write_all(buf.as_bytes()).await
+            } else {
+                self.plugin_instance.warn(format!(
+                    "tried to write stdin of dead process {} (PID {})",
+                    self.cmd, self.pid
+                ));
+                Ok(())
+            }
         })?;
         Ok(())
     }
@@ -706,7 +705,7 @@ impl UserData for WindowHandle {
 
 fn register_plugin_instance<'lua>(
     lua: &'lua Lua,
-    (name, _args): (String, Value),
+    (name, opts): (String, Value),
     ctx: Arc<LuaContext>,
 ) -> mlua::Result<Value<'lua>> {
     let mut plugin_instances = ctx.plugin_instances.write().unwrap();
@@ -718,7 +717,15 @@ fn register_plugin_instance<'lua>(
         Ok(Value::Nil)
     } else {
         debug!("registering plugin instance {}", name);
-        let plugin_instance = Arc::new(PluginInstance::new(name));
+        let mut cleanup_key = None;
+
+        if let Value::Table(opts_table) = opts {
+            if let Ok(cb) = opts_table.get::<_, Function>("on_cleanup") {
+                cleanup_key = Some(lua.create_registry_value(cb)?);
+            }
+        }
+
+        let plugin_instance = Arc::new(PluginInstance::new(name, cleanup_key));
         let plugin_instance_handle = PluginInstanceHandle {
             plugin_instance: plugin_instance.clone(),
             ctx: ctx.clone(),
