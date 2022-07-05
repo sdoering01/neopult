@@ -24,7 +24,12 @@ pub struct ManagedWindow {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Mode {
-    Max { width: u16, height: u16 },
+    Max {
+        width: u16,
+        height: u16,
+        /// The max window with the highest priority will be chosen as the primary window
+        priority: u32,
+    },
     Min,
     Hidden,
 }
@@ -468,9 +473,19 @@ impl WindowManager {
     ) -> anyhow::Result<()> {
         self.ensure_managed(id)?;
 
+        self.managed_windows.values_mut().for_each(|win| {
+            if let Mode::Max { ref mut priority, .. } = win.mode {
+                *priority -= 1;
+            }
+        });
+
         let window = self.managed_windows.get_mut(&id).unwrap();
         let was_hidden = window.mode == Mode::Hidden;
-        window.mode = Mode::Max { width, height };
+        window.mode = Mode::Max {
+            width,
+            height,
+            priority: u32::MAX,
+        };
         drop(window);
 
         if was_hidden {
@@ -655,7 +670,7 @@ impl WindowManager {
                 .get(&primary_window_id)
                 .expect("primary window is not a managed window");
             match primary_window.mode {
-                Mode::Max { width, height } => {
+                Mode::Max { width, height, .. } => {
                     self.change_window_geometry(
                         lua,
                         primary_window,
@@ -686,11 +701,13 @@ impl WindowManager {
     }
 
     fn find_new_primary_window(&mut self) -> Option<ManagedWid> {
-        // TODO: Implement some kind of order, so that the window that was max most recently is the
-        // new primary window?
         self.managed_windows
             .values()
-            .find(|w| matches!(w.mode, Mode::Max { .. }))
+            .filter(|w| matches!(w.mode, Mode::Max { .. }))
+            .max_by_key(|w| match w.mode {
+                Mode::Max { priority, .. } => priority,
+                _ => unreachable!(),
+            })
             .map(|w| w.id)
     }
 
