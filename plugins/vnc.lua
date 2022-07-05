@@ -77,7 +77,7 @@ M.setup = function()
                     M.window_handle:unclaim()
                     M.window_handle = nil
                 end
-                if cur_status ~= M.INACTIVE then
+                if cur_status ~= STATUS_INACTIVE then
                     M.process_handle:kill()
                     M.process_handle = nil
                 end
