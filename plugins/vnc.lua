@@ -7,6 +7,9 @@ local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
+local DISPLAY_NUM = 6
+local VIEWER_BINARY = "ssvncviewer"
+
 local M = {}
 
 M.plugin_handle = nil
@@ -58,13 +61,14 @@ M.setup = function()
             M.module_handle:register_action("start", function()
                 M.module_handle:info("start action called")
                 if M.module_handle:get_status() == STATUS_INACTIVE then
-                    M.process_handle = M.plugin_handle:spawn_process("ssvncviewer", {
-                        args = { "-viewonly", "-listen", "6" },
+                    M.process_handle = M.plugin_handle:spawn_process(VIEWER_BINARY, {
+                        args = { "-viewonly", "-listen", tostring(DISPLAY_NUM) },
                         on_output = M.handle_line,
                     })
                     M.module_handle:set_status(STATUS_WAITING)
 
-                    local address = "127.0.0.1:5506"
+                    local port = 5500 + DISPLAY_NUM
+                    local address = "127.0.0.1:" .. port
                     local message = "with a vnc client connect to " .. address
                     M.module_handle:info(message)
                     M.module_handle:set_message(message)
@@ -76,6 +80,13 @@ M.setup = function()
                 if cur_status == STATUS_ACTIVE then
                     M.window_handle:unclaim()
                     M.window_handle = nil
+
+                    -- The viewer window is created in a new process, which is
+                    -- not terminated, when the "listen process" is terminated.
+                    -- We need to terminate that new process manually.
+                    local kill_cmd = string.format("pkill -f '^%s.*-listen %d'", VIEWER_BINARY, DISPLAY_NUM)
+                    M.module_handle:debug("killing viewer with command: " .. kill_cmd)
+                    os.execute(kill_cmd)
                 end
                 if cur_status ~= STATUS_INACTIVE then
                     M.process_handle:kill()
