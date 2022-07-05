@@ -1,2 +1,10 @@
 /target
 /vnc_home
+
+# latex noise
+/assets/**/*.aux
+/assets/**/*.log
+/assets/**/*.nav
+/assets/**/*.out
+/assets/**/*.snm
+/assets/**/*.toc

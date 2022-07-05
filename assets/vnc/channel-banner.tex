@@ -1,0 +1,19 @@
+\documentclass{article}
+
+\usepackage[paperwidth=160mm,paperheight=90mm,vcentering]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{helvet}
+\usepackage{pgffor}
+
+\pagenumbering{gobble}
+
+\begin{document}
+\fontfamily{phv}\selectfont
+\foreach \channel in {1,...,99}{
+    \vspace*{\stretch{2}}
+    \textbf{\Huge VNC Channel \channel}
+    \centering
+    \vspace{\stretch{3}}
+    \clearpage
+}
+\end{document}
