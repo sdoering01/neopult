@@ -203,6 +203,7 @@ impl PluginInstanceHandle {
 
         let process_handle = ProcessHandle {
             cmd,
+            pid,
             ctx: self.ctx.clone(),
             child: child_mutex,
             plugin_instance: self.plugin_instance.clone(),
@@ -552,6 +553,7 @@ struct ProcessHandle {
     child: Arc<Mutex<Child>>,
     ctx: Arc<LuaContext>,
     cmd: String,
+    pid: u32,
     plugin_instance: Arc<PluginInstance>,
 }
 
@@ -575,18 +577,18 @@ impl ProcessHandle {
     }
 
     fn kill(&mut self) -> mlua::Result<()> {
+        self.plugin_instance
+            .debug(format!("killing process {} (PID {})", self.cmd, self.pid));
         self.ctx.runtime.block_on(async {
             let mut child = self.child.lock().await;
-            if let Some(pid) = child.id() {
-                match child.kill().await {
-                    Ok(_) => {
-                        let _ = child.wait().await;
-                    }
-                    Err(e) => self.plugin_instance.warn(format!(
-                        "Tried to to kill process {} (PID {}) which is not running: {}",
-                        self.cmd, pid, e
-                    )),
+            match child.kill().await {
+                Ok(_) => {
+                    let _ = child.wait().await;
                 }
+                Err(e) => self.plugin_instance.warn(format!(
+                    "Tried to to kill process {} (PID {}) which is not running: {}",
+                    self.cmd, self.pid, e
+                )),
             }
         });
         Ok(())
