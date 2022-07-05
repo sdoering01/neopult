@@ -223,6 +223,7 @@ impl PluginInstanceHandle {
         let poll_interval_ms = 50;
         let mut timeout_ms = 250;
         let mut min_geometry = MinGeometry::default();
+        let mut ignore_managed = false;
 
         if let Value::Table(opts_table) = opts {
             if let Ok(timeout) = opts_table.get::<_, u64>("timeout_ms") {
@@ -239,6 +240,9 @@ impl PluginInstanceHandle {
                     }
                 };
             }
+            if let Ok(ignore_managed_arg) = opts_table.get::<_, bool>("ignore_managed") {
+                ignore_managed = ignore_managed_arg;
+            }
         }
 
         self.plugin_instance.debug(format!(
@@ -250,7 +254,7 @@ impl PluginInstanceHandle {
 
         let timeout_end = Instant::now() + Duration::from_millis(timeout_ms);
         while Instant::now() < timeout_end {
-            match window_manager.get_window_by_class(&class) {
+            match window_manager.get_window_by_class(&class, ignore_managed) {
                 Ok(Some(window)) => {
                     self.plugin_instance.debug(format!(
                         "Got window with class {}; letting the window manager manage it",

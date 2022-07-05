@@ -353,7 +353,11 @@ impl WindowManager {
         })
     }
 
-    pub fn get_window_by_class(&self, to_claim: &str) -> anyhow::Result<Option<x::Window>> {
+    pub fn get_window_by_class(
+        &self,
+        to_claim: &str,
+        ignore_managed: bool,
+    ) -> anyhow::Result<Option<x::Window>> {
         let cookie = self.conn.send_request(&x::QueryTree {
             window: self.screen.root(),
         });
@@ -395,7 +399,7 @@ impl WindowManager {
                     if class.contains(to_claim) {
                         let managed_reply = self.conn.wait_for_reply(managed_cookie)?;
                         let managed_hint = str::from_utf8(managed_reply.value()).unwrap();
-                        if managed_hint != MANAGED_HINT {
+                        if ignore_managed || managed_hint != MANAGED_HINT {
                             return Ok(Some(window));
                         }
                     }
@@ -474,7 +478,10 @@ impl WindowManager {
         self.ensure_managed(id)?;
 
         self.managed_windows.values_mut().for_each(|win| {
-            if let Mode::Max { ref mut priority, .. } = win.mode {
+            if let Mode::Max {
+                ref mut priority, ..
+            } = win.mode
+            {
                 *priority -= 1;
             }
         });
