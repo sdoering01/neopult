@@ -505,26 +505,28 @@ impl WindowManager {
         self.primary_window = Some(id);
         self.reposition_windows(lua)?;
 
-        if let Some(wid) = previous_primary_window {
-            let window = self
-                .managed_windows
-                .get(&wid)
-                .expect("previous primary window is not managed");
+        if previous_primary_window != self.primary_window {
+            if let Some(wid) = previous_primary_window {
+                let window = self
+                    .managed_windows
+                    .get(&wid)
+                    .expect("previous primary window is not managed");
 
-            if let WindowVariant::VirtualWindow {
-                primary_demotion_action,
-                ..
-            } = &window.variant
-            {
-                match primary_demotion_action {
-                    PrimaryDemotionAction::DoNothing => (),
-                    PrimaryDemotionAction::MakeMin => {
-                        let id = window.id;
-                        self.min_window(lua, id)?;
-                    }
-                    PrimaryDemotionAction::Hide => {
-                        let id = window.id;
-                        self.hide_window(lua, id)?;
+                if let WindowVariant::VirtualWindow {
+                    primary_demotion_action,
+                    ..
+                } = &window.variant
+                {
+                    match primary_demotion_action {
+                        PrimaryDemotionAction::DoNothing => (),
+                        PrimaryDemotionAction::MakeMin => {
+                            let id = window.id;
+                            self.min_window(lua, id)?;
+                        }
+                        PrimaryDemotionAction::Hide => {
+                            let id = window.id;
+                            self.hide_window(lua, id)?;
+                        }
                     }
                 }
             }
