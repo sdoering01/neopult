@@ -15,7 +15,10 @@ M.setup = function(args)
         end
     end })
     if M.plugin_handle then
-        M.window_handle = M.plugin_handle:claim_window('zathura', { ignore_managed = true })
+        M.window_handle = M.plugin_handle:claim_window("zathura", {
+            min_geometry = string.format("%dx%d+0+0", resolution[1], resolution[2]),
+            ignore_managed = true
+        })
         if M.window_handle then
             M.window_handle:max(resolution)
         end

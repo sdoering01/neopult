@@ -28,8 +28,8 @@ function PluginInstanceHandle:register_module(name) end
 function PluginInstanceHandle:spawn_process(cmd, opts) end
 
 -- Claims a window that is not already managed and whose class (WM_CLASS atom)
--- contains `class`. This operation blocks for at most `opts.timeout_ms`
--- milliseconds.
+-- contains `class`. This puts the window to min mode automatically. This
+-- operation blocks for at most `opts.timeout_ms` milliseconds.
 -- This function should be used to claim a window of a process that was spawned
 -- before.
 --- @param class string substring of window's class
