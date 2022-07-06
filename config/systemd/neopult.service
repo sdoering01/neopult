@@ -1,0 +1,19 @@
+# NOTE: For now this is only a proof of concept and should not be used
+
+[Unit]
+Description=NeoPULT
+Requires=vncserver.service
+After=network.target vncserver.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/simon/shared/code/neopult
+Environment="DISPLAY=:5"
+Environment="RUST_LOG=debug"
+ExecStart=/home/simon/shared/code/neopult/target/debug/neopult
+# Shutdown gracefully
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

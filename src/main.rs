@@ -113,8 +113,11 @@ fn main() -> Result<()> {
             plugin_event_tx.clone(),
             plugin_notification_tx.clone(),
         ));
-        let mut terminal_client_handle =
-            tokio::spawn(terminal_client(plugin_event_tx, plugin_notification_tx));
+        let terminal_client_handle =
+            tokio::spawn(async {
+                terminal_client(plugin_event_tx, plugin_notification_tx).await;
+                println!("terminal client exited");
+            });
 
         // This must happen before waiting for shutdown or recv() will sleep forever
         drop(shutdown_wait_tx);
@@ -139,11 +142,6 @@ fn main() -> Result<()> {
                 }
                 plugin_system_handle.abort();
                 terminal_client_handle.abort();
-            },
-            _ = &mut terminal_client_handle => {
-                println!("terminal client exited");
-                plugin_system_handle.abort();
-                server_handle.abort();
             },
             _ = signal::ctrl_c() => {
                 println!("got ctrl-c, shutting down gracefully (press ctrl-c again to force shutdown)");

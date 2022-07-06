@@ -14,4 +14,11 @@ Xvnc :5 -auth "$HOME/.Xauthority" -rfbport 5905 -geometry 1920x1080 -depth 24 -p
 sleep 1
 
 export DISPLAY=:5
-zathura --mode=presentation --page=1 assets/vnc/channel-banner.pdf
+zathura --mode=presentation --page=1 assets/vnc/channel-banner.pdf &
+
+# For the sake of simplicity just block by sleeping
+if [ "$1" != "-d" ]; then
+    sleep 1e100
+else
+    echo "Going to background"
+fi
