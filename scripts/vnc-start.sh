@@ -1,10 +1,10 @@
 #!/bin/sh
 
-export HOME="$(pwd)/vnc_home"
+export HOME="$(pwd)/neopult_home/channel-default"
 export XDG_CONFIG_HOME="$HOME/.config"
 
 if ! [ -d "$HOME" ]; then
-    echo "Please run the setup script (vnc-setup.sh) first"
+    echo "Please run the setup script (neopult-setup.sh) first"
     exit 1
 fi
 

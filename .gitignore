@@ -1,5 +1,5 @@
 /target
-/vnc_home
+/neopult_home
 
 # latex noise
 /assets/**/*.aux

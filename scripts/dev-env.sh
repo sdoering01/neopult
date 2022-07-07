@@ -1,4 +1,4 @@
-#/usr/bin/sh
+#!/bin/sh
 
 # Sets up the development environment. Run this script outside of tmux or in a
 # fresh tmux session.
@@ -23,20 +23,23 @@ else
     tmux new-window -t 3 -c web
     tmux send -t 3 'nvim .'
 
-    if [ -d vnc_home ]; then
-        vnc_cmd="./vnc-start.sh"
-        vnc_setup=true
+    if [ -d neopult_home ]; then
+        vnc_cmd="./scripts/vnc-start.sh"
+        neopult_setup=true
     else
-        vnc_cmd="./vnc-setup.sh && ./vnc-start.sh"
-        vnc_setup=false
+        vnc_cmd="./scripts/neopult-setup.sh && ./scripts/vnc-start.sh"
+        neopult_setup=false
     fi
-    tmux new-window -t 4 -n xvnc "$vnc_cmd"
+    tmux new-window -t 4 -n xvnc
+    tmux send -t 4 "$vnc_cmd"
 
-    tmux new-window -t 5 -c ../cvh-camera/sender -n sender python -m http.server 3000
+    tmux new-window -t 5 -c ../cvh-camera/sender -n sender
+    tmux send -t 5 'python -m http.server 3000'
 
-    tmux new-window -t 6 -n novnc novnc --vnc localhost:5905
+    tmux new-window -t 6 -n novnc
+    tmux send -t 6 'novnc --vnc localhost:5905'
 
-    if $vnc_setup; then
+    if $neopult_setup; then
         tmux select-window -t 1
     else
         tmux select-window -t 4
