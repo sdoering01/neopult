@@ -1,8 +1,6 @@
 local api = neopult.api
 local log = neopult.log
 
-local default_cameras = 4
-
 local DEFAULT_GEOMETRIES = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
 
 local STATUS_WAITING = "waiting"
@@ -69,7 +67,17 @@ end
 
 M.setup = function(args)
     args = args or {}
-    local cameras = args.cameras or default_cameras
+
+    local port = args.port or 5000
+    local cameras = args.cameras or 4
+    local notify_path = args.notify_path or "camera-server-output"
+    local janus_url = args.janus_url or "http://localhost:8088/janus"
+    local janus_room = args.janus_room or 1000
+    local janus_room_secret = args.janus_room_secret or "default"
+    local janus_room_pin = args.janus_room_pin or "default"
+    local janus_bitrate = args.janus_bitrate or 128000
+    local janus_admin_key = args.janus_admin_key or "secret"
+
     if args.generate_secure_tokens == false then
         M.generate_secure_tokens = false
     end
@@ -87,7 +95,17 @@ M.setup = function(args)
     if M.plugin_handle then
         M.camera_server_handle = M.plugin_handle:spawn_process("node", {
             args = { args.camera_server_path },
-            envs = { CONFIG_PATH = "./plugins/cvh_camera/config.json" },
+            envs = {
+                CVH_CAMERA_CONFIG_port = tostring(port),
+                CVH_CAMERA_CONFIG_cameraSlots = tostring(cameras),
+                CVH_CAMERA_CONFIG_notifyPath = tostring(notify_path),
+                CVH_CAMERA_CONFIG_janusURL = tostring(janus_url),
+                CVH_CAMERA_CONFIG_janusRoom = tostring(janus_room),
+                CVH_CAMERA_CONFIG_janusRoomSecret = tostring(janus_room_secret),
+                CVH_CAMERA_CONFIG_janusRoomPin = tostring(janus_room_pin),
+                CVH_CAMERA_CONFIG_janusBitrate = tostring(janus_bitrate),
+                CVH_CAMERA_CONFIG_janusAdminKey = tostring(janus_admin_key),
+            },
         })
 
         if not M.camera_server_handle then
@@ -95,9 +113,11 @@ M.setup = function(args)
             return
         end
 
-        -- TODO: Read notify path from config file
+        local notify_create_cmd = string.format([[sh -c 'test -p "%s" || mkfifo "%s"']], notify_path, notify_path)
+        os.execute(notify_create_cmd)
+
         M.notify_handle = M.plugin_handle:spawn_process("tail", {
-            args = { "-f", "camera-server-output" },
+            args = { "-f", notify_path },
             on_output = handle_notify,
         })
 
