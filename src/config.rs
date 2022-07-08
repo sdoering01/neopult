@@ -5,8 +5,6 @@ use std::{env, path::PathBuf};
 pub struct Config {
     pub channel: u8,
     pub neopult_home: PathBuf,
-    pub default_channel_home: PathBuf,
-    /// Will be the specific channel home (if it exists) or else the default channel home.
     pub channel_home: PathBuf,
 }
 
@@ -73,26 +71,15 @@ pub fn get_config() -> anyhow::Result<Config> {
         env::set_var("HOME", &neopult_home);
     }
 
-    let default_channel_home = neopult_home.join("channel-default");
-    debug!("using default channel home {:?}", default_channel_home);
-    if !default_channel_home.exists() {
-        anyhow::bail!("default channel home directory does not exist");
+    let channel_home = neopult_home.join(format!("channel-{}", channel));
+    debug!("using channel home {:?}", channel_home);
+    if !channel_home.exists() {
+        anyhow::bail!("channel home directory does not exist");
     }
-
-    let specific_channel_home = neopult_home.join(format!("channel-{}", channel));
-    debug!("using specific channel home {:?}", specific_channel_home);
-    let channel_home = if specific_channel_home.exists() {
-        debug!("specific channel home directory exists");
-        specific_channel_home
-    } else {
-        debug!("specific channel home directory does not exist -- falling back to default channel home");
-        default_channel_home.clone()
-    };
 
     let config = Config {
         channel,
         neopult_home,
-        default_channel_home,
         channel_home,
     };
     Ok(config)

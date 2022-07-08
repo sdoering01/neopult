@@ -36,23 +36,22 @@ if [ $channel -lt 0 ] || [ $channel -ge 100 ]; then
     exit 1
 fi
 
-default_channel_home="$neopult_home/channel-default"
-specific_channel_home="$neopult_home/channel-$channel"
-if [ -d "$specific_channel_home" ]; then
-    export HOME="$specific_channel_home"
-else
-    export HOME="$default_channel_home"
+channel_home="$neopult_home/channel-$channel"
+if ! [ -d "$channel_home" ]; then
+    echo "Channel home directory does not exist. Please run the setup script (neopult-setup.sh) first"
+    exit 1
 fi
 
 rfbport=$(printf "59%02d" $channel)
 export DISPLAY=":$channel"
-Xvnc $DISPLAY -auth "$HOME/.Xauthority" -rfbport $rfbport -geometry 1920x1080 -depth 24 -pn -localhost -rfbauth "$HOME/.vnc/passwd" -nocursor &
+Xvnc $DISPLAY -auth "$channel_home/.Xauthority" -rfbport $rfbport -geometry 1920x1080 -depth 24 -pn -localhost -rfbauth "$channel_home/.vnc/passwd" -nocursor &
 
 # Wait for vnc server to start
 sleep 1
 
+export HOME="$channel_home"
 export NEOPULT_CHANNEL=$channel
-vncstartup="$HOME/vncstartup"
+vncstartup="$channel_home/vncstartup"
 if [ -x "$vncstartup" ]; then
     "$vncstartup"
 fi

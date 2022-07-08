@@ -370,9 +370,8 @@ pub fn start(
     let package_table = globals.get::<_, Table>("package")?;
     let lua_path: String = package_table.get("path")?;
     let channel_path = config.channel_home.display().to_string();
-    let default_channel_path = config.default_channel_home.display().to_string();
     let mut neopult_lua_path = String::new();
-    for path in [&channel_path, &default_channel_path, GLOBAL_CONFIG_DIR] {
+    for path in [&channel_path, GLOBAL_CONFIG_DIR] {
         neopult_lua_path += &format!(
             "{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;",
             path, path, path
