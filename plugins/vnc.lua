@@ -7,7 +7,6 @@ local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
-local DISPLAY_NUM = 6
 local VIEWER_BINARY = "ssvncviewer"
 
 local M = {}
@@ -47,13 +46,21 @@ M.handle_line = function(line)
     end
 end
 
-M.setup = function()
+M.setup = function(args)
+    args = args or {}
+
+    local listen = args.listen
+
+    if listen == nil then
+        error("vnc plugin setup called without mandatory `listen` parameter")
+    end
+
     log.debug("vnc module setup")
-    M.plugin_handle = api.register_plugin_instance("vnc")
+    M.plugin_handle = api.register_plugin_instance("vnc-" .. listen)
     if M.plugin_handle then
         M.plugin_handle:debug("sucessfully created plugin handle")
 
-        M.module_handle = M.plugin_handle:register_module("vnc")
+        M.module_handle = M.plugin_handle:register_module("vnc-" .. listen)
 
         if M.module_handle then
             M.module_handle:set_status(STATUS_INACTIVE)
@@ -62,12 +69,12 @@ M.setup = function()
                 M.module_handle:info("start action called")
                 if M.module_handle:get_status() == STATUS_INACTIVE then
                     M.process_handle = M.plugin_handle:spawn_process(VIEWER_BINARY, {
-                        args = { "-viewonly", "-listen", tostring(DISPLAY_NUM) },
+                        args = { "-viewonly", "-listen", tostring(listen) },
                         on_output = M.handle_line,
                     })
                     M.module_handle:set_status(STATUS_WAITING)
 
-                    local port = 5500 + DISPLAY_NUM
+                    local port = 5500 + listen
                     local address = "127.0.0.1:" .. port
                     local message = "with a vnc client connect to " .. address
                     M.module_handle:info(message)
@@ -84,7 +91,7 @@ M.setup = function()
                     -- The viewer window is created in a new process, which is
                     -- not terminated, when the "listen process" is terminated.
                     -- We need to terminate that new process manually.
-                    local kill_cmd = string.format("pkill -f '^%s.*-listen %d'", VIEWER_BINARY, DISPLAY_NUM)
+                    local kill_cmd = string.format("pkill -f '^%s.*-listen %d'", VIEWER_BINARY, listen)
                     M.module_handle:debug("killing viewer with command: " .. kill_cmd)
                     os.execute(kill_cmd)
                 end
