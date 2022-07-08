@@ -68,11 +68,13 @@ end
 M.setup = function(args)
     args = args or {}
 
-    local port = args.port or 5000
+    local channel = api.get_channel()
+
+    local port = args.port or (5000 + channel)
     local cameras = args.cameras or 4
     local notify_path = args.notify_path or "camera-server-output"
     local janus_url = args.janus_url or "http://localhost:8088/janus"
-    local janus_room = args.janus_room or 1000
+    local janus_room = args.janus_room or (1000 + channel)
     local janus_room_secret = args.janus_room_secret or "default"
     local janus_room_pin = args.janus_room_pin or "default"
     local janus_bitrate = args.janus_bitrate or 128000
@@ -146,7 +148,7 @@ M.setup = function(args)
                 M.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
                 module_handle:set_status(STATUS_WAITING)
 
-                local sender_link = M.sender_base_url .. "?token=" .. token .. "&slot=" .. (camera - 1)
+                local sender_link = string.format("%s?slot=%d&room=%d&token=%s", M.sender_base_url, camera - 1, janus_room, token)
                 local sender_message = generate_sender_message(sender_link)
                 module_handle:info(sender_message)
                 module_handle:set_message(sender_message)

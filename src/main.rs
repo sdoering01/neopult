@@ -1,12 +1,13 @@
 use anyhow::Result;
 use env_logger::Env;
-use std::process;
+use std::{process, sync::Arc};
 use tokio::{
     io::{self, AsyncBufReadExt, BufReader},
     signal,
     sync::{broadcast, mpsc, oneshot},
 };
 
+mod config;
 mod plugin_system;
 mod server;
 mod window_manager;
@@ -73,6 +74,8 @@ async fn terminal_client(
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
 
+    let config = Arc::new(config::get_config()?);
+
     let (plugin_event_tx, plugin_event_rx) = mpsc::channel(64);
     let (plugin_notification_tx, _) = broadcast::channel(64);
 
@@ -93,12 +96,14 @@ fn main() -> Result<()> {
 
     runtime.block_on(async {
         let mut plugin_system_handle = runtime.spawn_blocking({
+            let config = config.clone();
             let event_tx = plugin_event_tx.clone();
             let notification_tx = plugin_notification_tx.clone();
             let shutdown_wait_tx = shutdown_wait_tx.clone();
             let shutdown_tx = shutdown_tx.clone();
             move || {
                 plugin_system::start(
+                    config,
                     shutdown_tx,
                     shutdown_wait_tx,
                     event_tx,
@@ -110,6 +115,7 @@ fn main() -> Result<()> {
         });
 
         let mut server_handle = tokio::spawn(server::start(
+            config,
             plugin_event_tx.clone(),
             plugin_notification_tx.clone(),
         ));

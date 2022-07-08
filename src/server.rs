@@ -22,6 +22,7 @@ use tokio::{
     time::{self, Duration, Instant},
 };
 use tower_http::services::ServeDir;
+use crate::config::Config;
 
 // NOTE: Make sure to adjust the values in the client accordingly
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -100,6 +101,7 @@ enum FromClientBody {
 }
 
 pub async fn start(
+    config: Arc<Config>,
     event_sender: mpsc::Sender<Event>,
     notification_sender: broadcast::Sender<Notification>,
 ) -> anyhow::Result<()> {
@@ -112,7 +114,7 @@ pub async fn start(
         .route("/ws", get(websocket_handler))
         .fallback(get_service(ServeDir::new("web")).handle_error(handle_error))
         .layer(Extension(ctx));
-    let addr = SocketAddr::from(([0, 0, 0, 0], 4200));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 4200 + config.channel as u16));
     info!("starting server on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())

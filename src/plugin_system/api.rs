@@ -740,6 +740,10 @@ fn generate_token(num_chars: u8) -> mlua::Result<String> {
     Ok(token)
 }
 
+fn get_channel(_lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<u8> {
+    Ok(ctx.config.channel)
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -749,11 +753,15 @@ pub(super) fn inject_api_functions(
 
     api.set(
         "register_plugin_instance",
-        create_context_function(lua, ctx, register_plugin_instance)?,
+        create_context_function(lua, ctx.clone(), register_plugin_instance)?,
     )?;
     api.set(
         "generate_token",
         lua.create_function(|_lua, num_chars| generate_token(num_chars))?,
+    )?;
+    api.set(
+        "get_channel",
+        create_context_function(lua, ctx, get_channel)?,
     )?;
 
     neopult.set("api", api)?;

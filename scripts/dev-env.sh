@@ -18,20 +18,22 @@ else
     tmux new-window -t 0 2>/dev/null
     tmux send -t 0 'nvim .'
 
-    tmux new-window -t 2 -e 'DISPLAY=:5' -e 'RUST_LOG=debug'
+    tmux new-window -t 2 -e 'DISPLAY=:5' -e 'RUST_LOG=debug' -e 'NEOPULT_CHANNEL=5' -e "NEOPULT_HOME=$(pwd)/neopult_home"
 
     tmux new-window -t 3 -c web
     tmux send -t 3 'nvim .'
 
+
+    vnc_cmd="./scripts/vnc-start.sh 5"
     if [ -d neopult_home ]; then
-        vnc_cmd="./scripts/vnc-start.sh"
+        vnc_window_cmd="$vnc_cmd"
         neopult_setup=true
     else
-        vnc_cmd="./scripts/neopult-setup.sh && ./scripts/vnc-start.sh"
+        vnc_window_cmd="./scripts/neopult-setup.sh && $vnc_cmd"
         neopult_setup=false
     fi
     tmux new-window -t 4 -n xvnc
-    tmux send -t 4 "$vnc_cmd"
+    tmux send -t 4 "$vnc_window_cmd"
 
     tmux new-window -t 5 -c ../cvh-camera/sender -n sender
     tmux send -t 5 'python -m http.server 3000'

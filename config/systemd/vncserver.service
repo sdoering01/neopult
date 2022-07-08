@@ -7,7 +7,7 @@ After=network.target
 [Service]
 Type=forking
 WorkingDirectory=/home/simon/shared/code/neopult
-ExecStart=/home/simon/shared/code/neopult/scripts/vnc-start.sh -d
+ExecStart=/home/simon/shared/code/neopult/scripts/vnc-start.sh 5 -d
 
 [Install]
 WantedBy=multi-user.target

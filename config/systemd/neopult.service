@@ -10,6 +10,8 @@ Type=simple
 WorkingDirectory=/home/simon/shared/code/neopult
 Environment="DISPLAY=:5"
 Environment="RUST_LOG=debug"
+Environment="NEOPULT_CHANNEL=5"
+Environment="NEOPULT_HOME=/home/simon/shared/code/neopult/neopult_home"
 ExecStart=/home/simon/shared/code/neopult/target/debug/neopult
 # Shutdown gracefully
 KillSignal=SIGINT

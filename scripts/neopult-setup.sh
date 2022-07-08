@@ -8,10 +8,16 @@ mkdir -p "$HOME"
 echo "Creating default channel home"
 mkdir -p "$DEFAULT_CHANNEL_HOME"
 
-echo "Copying zathura config"
+echo "Linking init.lua to default channel home"
+ln -s "$(pwd)/init.lua" "$DEFAULT_CHANNEL_HOME"
+
+echo "Linking plugin directory to default channel home"
+ln -s "$(pwd)/plugins" "$DEFAULT_CHANNEL_HOME"
+
+echo "Linking zathura config to default channel home"
 ZATHURA_CONFIG_DIR="$DEFAULT_CHANNEL_HOME/.config/zathura"
 mkdir -p "$ZATHURA_CONFIG_DIR"
-cp -p assets/vnc/zathurarc "$ZATHURA_CONFIG_DIR"
+ln -s "$(pwd)/assets/vnc/zathurarc" "$ZATHURA_CONFIG_DIR"
 
 export HOME="$DEFAULT_CHANNEL_HOME"
 

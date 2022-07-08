@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::window_manager::WindowManager;
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
@@ -17,6 +18,7 @@ const SEPARATOR: &str = "::";
 
 #[derive(Debug)]
 struct LuaContext {
+    config: Arc<Config>,
     runtime: tokio::runtime::Runtime,
     plugin_instances: RwLock<Vec<Arc<PluginInstance>>>,
     event_sender: Arc<mpsc::Sender<Event>>,
@@ -347,6 +349,7 @@ fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
 }
 
 pub fn start(
+    config: Arc<Config>,
     shutdown_tx: broadcast::Sender<()>,
     shutdown_wait_tx: mpsc::Sender<()>,
     event_tx: mpsc::Sender<Event>,
@@ -361,7 +364,22 @@ pub fn start(
 
     let runtime = tokio::runtime::Builder::new_current_thread().build()?;
 
+    let globals = lua.globals();
+
+    // Look for lua modules in the specified paths first
+    let package_table = globals.get::<_, Table>("package")?;
+    let lua_path: String = package_table.get("path")?;
+    let channel_dir = format!("channel-{}", config.channel);
+    let channel_path = config.home.join(channel_dir).display().to_string();
+    let default_channel_path = config.home.join("channel-default").display().to_string();
+    let mut neopult_lua_path = String::new();
+    for path in [&channel_path, &default_channel_path, "/etc/neopult"] {
+        neopult_lua_path += &format!("{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;", path, path, path);
+    }
+    package_table.set("path", neopult_lua_path + &lua_path)?;
+
     let ctx = Arc::new(LuaContext {
+        config,
         runtime,
         plugin_instances: RwLock::new(Vec::new()),
         event_sender: Arc::new(event_tx),
@@ -372,14 +390,6 @@ pub fn start(
         // every context reference on shutdown.
         plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
     });
-
-    let globals = lua.globals();
-
-    // Look for lua modules in the specified paths first
-    let package_table = globals.get::<_, Table>("package")?;
-    let mut lua_path: String = package_table.get("path")?;
-    lua_path.insert_str(0, "./plugins/?.lua;./plugins/?/init.lua;");
-    package_table.set("path", lua_path)?;
 
     inject_plugin_api(&lua, ctx.clone()).context("error when injecting plugin api")?;
 
