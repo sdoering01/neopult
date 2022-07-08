@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, GLOBAL_CONFIG_DIR};
 use crate::window_manager::WindowManager;
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
@@ -369,12 +369,14 @@ pub fn start(
     // Look for lua modules in the specified paths first
     let package_table = globals.get::<_, Table>("package")?;
     let lua_path: String = package_table.get("path")?;
-    let channel_dir = format!("channel-{}", config.channel);
-    let channel_path = config.home.join(channel_dir).display().to_string();
-    let default_channel_path = config.home.join("channel-default").display().to_string();
+    let channel_path = config.channel_home.display().to_string();
+    let default_channel_path = config.default_channel_home.display().to_string();
     let mut neopult_lua_path = String::new();
-    for path in [&channel_path, &default_channel_path, "/etc/neopult"] {
-        neopult_lua_path += &format!("{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;", path, path, path);
+    for path in [&channel_path, &default_channel_path, GLOBAL_CONFIG_DIR] {
+        neopult_lua_path += &format!(
+            "{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;",
+            path, path, path
+        );
     }
     package_table.set("path", neopult_lua_path + &lua_path)?;
 
