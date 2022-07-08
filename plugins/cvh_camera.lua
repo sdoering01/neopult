@@ -69,10 +69,11 @@ M.setup = function(args)
     args = args or {}
 
     local channel = api.get_channel()
+    local channel_home = api.get_channel_home()
 
     local port = args.port or (5000 + channel)
     local cameras = args.cameras or 4
-    local notify_path = args.notify_path or "camera-server-output"
+    local notify_path = args.notify_path or (channel_home .. "/camera-server-output-" .. channel)
     local janus_url = args.janus_url or "http://localhost:8088/janus"
     local janus_room = args.janus_room or (1000 + channel)
     local janus_room_secret = args.janus_room_secret or "default"

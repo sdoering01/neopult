@@ -14,6 +14,9 @@ ln -s "$(pwd)/init.lua" "$DEFAULT_CHANNEL_HOME"
 echo "Linking plugin directory to default channel home"
 ln -s "$(pwd)/plugins" "$DEFAULT_CHANNEL_HOME"
 
+echo "Linking vncstartup script to default channel home"
+ln -s "$(pwd)/assets/vnc/vncstartup" "$DEFAULT_CHANNEL_HOME"
+
 echo "Linking zathura config to default channel home"
 ZATHURA_CONFIG_DIR="$DEFAULT_CHANNEL_HOME/.config/zathura"
 mkdir -p "$ZATHURA_CONFIG_DIR"

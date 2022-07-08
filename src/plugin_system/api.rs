@@ -744,6 +744,10 @@ fn get_channel(_lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<u8> {
     Ok(ctx.config.channel)
 }
 
+fn get_channel_home(_lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<String> {
+    Ok(ctx.config.channel_home.display().to_string())
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -761,7 +765,11 @@ pub(super) fn inject_api_functions(
     )?;
     api.set(
         "get_channel",
-        create_context_function(lua, ctx, get_channel)?,
+        create_context_function(lua, ctx.clone(), get_channel)?,
+    )?;
+    api.set(
+        "get_channel_home",
+        create_context_function(lua, ctx, get_channel_home)?,
     )?;
 
     neopult.set("api", api)?;

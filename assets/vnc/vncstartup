@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# This script is run after the vnc server is started and must not block.
+
+export XDG_CONFIG_HOME="$HOME/.config"
+zathura --mode=presentation --page=$NEOPULT_CHANNEL assets/vnc/channel-banner.pdf &
