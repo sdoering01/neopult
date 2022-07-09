@@ -22,7 +22,7 @@ use tokio::{
     },
     time::{self, Duration, Instant},
 };
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 
 // NOTE: Make sure to adjust the values in the client accordingly
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -113,7 +113,8 @@ pub async fn start(
     let app = Router::new()
         .route("/ws", get(websocket_handler))
         .fallback(get_service(ServeDir::new(WEB_ROOT)).handle_error(handle_error))
-        .layer(Extension(ctx));
+        .layer(Extension(ctx))
+        .layer(TraceLayer::new_for_http());
     let addr = SocketAddr::from(([0, 0, 0, 0], 4200 + config.channel as u16));
     info!("starting server on {}", addr);
     axum::Server::bind(&addr)
