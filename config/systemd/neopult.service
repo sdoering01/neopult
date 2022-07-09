@@ -2,7 +2,7 @@
 
 [Unit]
 Description=NeoPULT
-Requires=vncserver.service
+Requires=vncserver.service novnc.service
 After=network.target vncserver.service
 
 [Service]

@@ -1,0 +1,14 @@
+# NOTE: For now this is only a proof of concept and should not be used
+
+[Unit]
+Description=noVNC VNC web client
+Requires=novnc.service
+After=network.target vncserver.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/simon/shared/code/neopult
+ExecStart=/home/simon/shared/code/neopult/scripts/novnc-start.sh 5
+
+[Install]
+WantedBy=multi-user.target

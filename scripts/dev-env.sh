@@ -39,7 +39,7 @@ else
     tmux send -t 5 'python -m http.server 3000'
 
     tmux new-window -t 6 -n novnc
-    tmux send -t 6 'novnc --vnc localhost:5905'
+    tmux send -t 6 './scripts/novnc-start.sh 5'
 
     if $neopult_setup; then
         tmux select-window -t 1
