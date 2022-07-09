@@ -120,7 +120,7 @@ full_uninstall() {
     userdel -r $NEOPULT_USER
 }
 
-if [ "$EUID" != 0 ]; then
+if [ $(id -u) != 0 ]; then
     echo "This script must be run as root"
     exit 1
 fi
