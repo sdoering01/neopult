@@ -1,13 +1,13 @@
 # NOTE: For now this is only a proof of concept and should not be used
 
 [Unit]
-Description=VNC server
+Description=VNC server %i
 After=network.target
 
 [Service]
 Type=forking
 WorkingDirectory=/home/simon/shared/code/neopult
-ExecStart=/home/simon/shared/code/neopult/scripts/vnc-start.sh 5 -d
+ExecStart=/home/simon/shared/code/neopult/scripts/vnc-start.sh %i -d
 
 [Install]
 WantedBy=multi-user.target
