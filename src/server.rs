@@ -1,3 +1,4 @@
+use crate::config::{Config, WEB_ROOT};
 use crate::plugin_system::{ActionIdentifier, ClientCommand, Event, Notification, SystemInfo};
 use axum::{
     extract::{
@@ -22,7 +23,6 @@ use tokio::{
     time::{self, Duration, Instant},
 };
 use tower_http::services::ServeDir;
-use crate::config::Config;
 
 // NOTE: Make sure to adjust the values in the client accordingly
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -112,7 +112,7 @@ pub async fn start(
 
     let app = Router::new()
         .route("/ws", get(websocket_handler))
-        .fallback(get_service(ServeDir::new("web")).handle_error(handle_error))
+        .fallback(get_service(ServeDir::new(WEB_ROOT)).handle_error(handle_error))
         .layer(Extension(ctx));
     let addr = SocketAddr::from(([0, 0, 0, 0], 4200 + config.channel as u16));
     info!("starting server on {}", addr);

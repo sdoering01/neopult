@@ -7,7 +7,9 @@ print_usage() {
     echo " -d             Go to background after starting vnc server. Useful for forking systemd services."
 }
 
-neopult_home="$(pwd)/neopult_home"
+if [ -z "$NEOPULT_HOME" ]; then
+    NEOPULT_HOME="$(pwd)/neopult_home"
+fi
 
 if [ $# -lt 1 ]; then
     print_usage
@@ -19,8 +21,10 @@ if [ $1 = "-h" ] || [ $1 = "--help" ]; then
     exit 0
 fi
 
-if ! [ -d "$neopult_home" ]; then
-    echo "Neopult home does not exist. Please run the setup script (neopult-setup.sh) first"
+echo "Using neopult home $NEOPULT_HOME"
+
+if ! [ -d "$NEOPULT_HOME" ]; then
+    echo "error: Neopult home does not exist"
     exit 1
 fi
 
@@ -36,9 +40,10 @@ if [ $channel -lt 0 ] || [ $channel -ge 100 ]; then
     exit 1
 fi
 
-channel_home="$neopult_home/channel-$channel"
+channel_home="$NEOPULT_HOME/channel-$channel"
+echo "Using channel home $channel_home"
 if ! [ -d "$channel_home" ]; then
-    echo "Channel home directory does not exist. Please run the setup script (neopult-setup.sh) first"
+    echo "error: Channel home directory does not exist"
     exit 1
 fi
 

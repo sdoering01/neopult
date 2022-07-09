@@ -1,0 +1,13 @@
+[Unit]
+Description=noVNC VNC web client for neopult channel %i
+Requires=neopult-novnc@%i.service
+After=network.target neopult-vncserver@%i.service
+
+[Service]
+Type=simple
+User=neopult
+Group=neopult
+ExecStart=/usr/local/share/neopult/scripts/novnc-start.sh %i
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=VNC server for neopult channel %i
+After=network.target
+
+[Service]
+Type=forking
+User=neopult
+Group=neopult
+Environment="NEOPULT_HOME=/home/neopult"
+ExecStart=/usr/local/share/neopult/scripts/vnc-start.sh %i -d
+
+[Install]
+WantedBy=multi-user.target

@@ -29,7 +29,7 @@ else
         vnc_window_cmd="$vnc_cmd"
         neopult_setup=true
     else
-        vnc_window_cmd="./scripts/neopult-setup.sh && $vnc_cmd"
+        vnc_window_cmd="./scripts/dev-setup.sh && $vnc_cmd"
         neopult_setup=false
     fi
     tmux new-window -t 4 -n xvnc

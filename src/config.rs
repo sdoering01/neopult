@@ -8,7 +8,13 @@ pub struct Config {
     pub channel_home: PathBuf,
 }
 
-pub const GLOBAL_CONFIG_DIR: &str = "/etc/neopult";
+pub const GLOBAL_DATA_DIR: &str = "/usr/local/share/neopult";
+
+pub const WEB_ROOT: &str = if cfg!(debug_assertions) {
+    "web"
+} else {
+    "/usr/local/share/neopult/web"
+};
 
 const CHANNEL_ENV_KEY: &str = "NEOPULT_CHANNEL";
 const CHANNEL_DEFAULT: u8 = 0;

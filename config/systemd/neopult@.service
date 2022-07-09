@@ -1,18 +1,16 @@
-# NOTE: For now this is only a proof of concept and should not be used
-
 [Unit]
-Description=NeoPULT %i
-Requires=vncserver@%i.service novnc@%i.service
-After=network.target vncserver@%i.service
+Description=NeoPULT channel %i
+Requires=neopult-vncserver@%i.service neopult-novnc@%i.service
+After=network.target neopult-vncserver@%i.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/simon/shared/code/neopult
+User=neopult
+Group=neopult
 Environment="DISPLAY=:%i"
 Environment="RUST_LOG=debug"
 Environment="NEOPULT_CHANNEL=%i"
-Environment="NEOPULT_HOME=/home/simon/shared/code/neopult/neopult_home"
-ExecStart=/home/simon/shared/code/neopult/target/debug/neopult
+ExecStart=/usr/local/bin/neopult
 # Shutdown gracefully
 KillSignal=SIGINT
 TimeoutStopSec=10
