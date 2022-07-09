@@ -1,5 +1,4 @@
 local api = neopult.api
-local log = neopult.log
 
 local DEFAULT_GEOMETRIES = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
 
@@ -7,65 +6,68 @@ local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
-local M = {}
+local function setup(args)
+    local P = {
+        camera_modules = {},
+        slot_active_states = {},
+        camera_handles = {},
+        sender_base_url = nil,
+        generate_secure_tokens = true,
+    }
 
-M.camera_modules = {}
-M.slot_active_states = {}
-M.camera_handles = {}
-
-M.sender_base_url = nil
-M.generate_secure_tokens = true
-
-local function generate_sender_message(sender_link)
-    return "follow <a href=\"" .. sender_link .. "\" target=\"_blank\">this link</a> to the camera sender"
-end
-
-local function handle_notify(line)
-    M.plugin_handle:info("camera server notify line " .. line)
-    local space = string.find(line, ' ')
-    if not space then
-        M.plugin_handle:error("camera server notify line didn't specify a slot")
-        return
+    P.generate_sender_message = function(sender_link)
+        return "follow <a href=\"" .. sender_link .. "\" target=\"_blank\">this link</a> to the camera sender"
     end
 
-    local type = string.sub(line, 1, space - 1)
-    if type == "new_feed" then
-        local slot_str = string.sub(line, space + 1)
-        local slot = tonumber(slot_str)
-        M.slot_active_states[slot + 1] = true
-        M.camera_handles[slot + 1] = M.plugin_handle:create_virtual_window("camera-" .. (slot + 1), {
-            set_geometry = function(x_offset, y_offset, width, height, alignment, z)
-                M.camera_server_handle:writeln("set_geometry_relative_to_canvas " .. slot ..  " " .. alignment .. " " .. x_offset .. " " .. y_offset .. " " .. width .. " " .. height .. " " .. z)
-            end,
-            map = function()
-                M.camera_server_handle:writeln("show " .. slot)
-            end,
-            unmap = function()
-                M.camera_server_handle:writeln("hide " .. slot)
-            end,
-            primary_demotion_action = "make_min",
-            min_geometry = DEFAULT_GEOMETRIES[slot + 1]
-        })
-        M.plugin_handle:info("new feed on slot " .. slot)
-        M.camera_modules[slot + 1]:set_status(STATUS_ACTIVE)
-    elseif type == "remove_feed" then
-        local slot_str = string.sub(line, space + 1)
-        local slot = tonumber(slot_str)
-        M.slot_active_states[slot + 1] = false
-        M.camera_handles[slot + 1]:unclaim()
-        M.camera_handles[slot + 1] = nil
-        M.plugin_handle:info("removed feed on slot " .. slot)
-        -- Only set status to waiting when status was active previously. This
-        -- prevents overwriting an inactive status.
-        if M.camera_modules[slot + 1]:get_status() == STATUS_ACTIVE then
-            M.camera_modules[slot + 1]:set_status(STATUS_WAITING)
+    P.handle_notify = function(line)
+        P.plugin_handle:info("camera server notify line " .. line)
+        local space = string.find(line, ' ')
+        if not space then
+            P.plugin_handle:error("camera server notify line didn't specify a slot")
+            return
         end
-    elseif type == "custom_name" then
-        M.plugin_handle:warn("camera server custom_name messages are not handled yet")
-    end
-end
 
-M.setup = function(args)
+        local type = string.sub(line, 1, space - 1)
+        if type == "new_feed" then
+            local slot_str = string.sub(line, space + 1)
+            local slot = tonumber(slot_str)
+            P.slot_active_states[slot + 1] = true
+            P.camera_handles[slot + 1] = P.plugin_handle:create_virtual_window("camera-" .. (slot + 1), {
+                set_geometry = function(x_offset, y_offset, width, height, alignment, z)
+                    local cmd = string.format(
+                        "set_geometry_relative_to_canvas %d %s %d %d %d %d %d",
+                        slot, alignment, x_offset, y_offset, width, height, z
+                    )
+                    P.camera_server_handle:writeln(cmd)
+                end,
+                map = function()
+                    P.camera_server_handle:writeln("show " .. slot)
+                end,
+                unmap = function()
+                    P.camera_server_handle:writeln("hide " .. slot)
+                end,
+                primary_demotion_action = "make_min",
+                min_geometry = DEFAULT_GEOMETRIES[slot + 1]
+            })
+            P.plugin_handle:info("new feed on slot " .. slot)
+            P.camera_modules[slot + 1]:set_status(STATUS_ACTIVE)
+        elseif type == "remove_feed" then
+            local slot_str = string.sub(line, space + 1)
+            local slot = tonumber(slot_str)
+            P.slot_active_states[slot + 1] = false
+            P.camera_handles[slot + 1]:unclaim()
+            P.camera_handles[slot + 1] = nil
+            P.plugin_handle:info("removed feed on slot " .. slot)
+            -- Only set status to waiting when status was active previously. This
+            -- prevents overwriting an inactive status.
+            if P.camera_modules[slot + 1]:get_status() == STATUS_ACTIVE then
+                P.camera_modules[slot + 1]:set_status(STATUS_WAITING)
+            end
+        elseif type == "custom_name" then
+            P.plugin_handle:warn("camera server custom_name messages are not handled yet")
+        end
+    end
+
     args = args or {}
 
     local channel = api.get_channel()
@@ -82,7 +84,7 @@ M.setup = function(args)
     local janus_admin_key = args.janus_admin_key or "secret"
 
     if args.generate_secure_tokens == false then
-        M.generate_secure_tokens = false
+        P.generate_secure_tokens = false
     end
 
     if args.camera_server_path == nil then
@@ -92,11 +94,11 @@ M.setup = function(args)
     if args.sender_base_url == nil then
         error("cvh_camera plugin setup called without mandatory `sender_base_url` parameter")
     end
-    M.sender_base_url = args.sender_base_url
+    P.sender_base_url = args.sender_base_url
 
-    M.plugin_handle = api.register_plugin_instance("cvh-camera")
-    if M.plugin_handle then
-        M.camera_server_handle = M.plugin_handle:spawn_process("node", {
+    P.plugin_handle = api.register_plugin_instance("cvh-camera")
+    if P.plugin_handle then
+        P.camera_server_handle = P.plugin_handle:spawn_process("node", {
             args = { args.camera_server_path },
             envs = {
                 CVH_CAMERA_CONFIG_port = tostring(port),
@@ -111,76 +113,80 @@ M.setup = function(args)
             },
         })
 
-        if not M.camera_server_handle then
-            M.plugin_handle:error("couldn't spawn camera server -- aborting plugin setup")
+        if not P.camera_server_handle then
+            P.plugin_handle:error("couldn't spawn camera server -- aborting plugin setup")
             return
         end
 
         local notify_create_cmd = string.format([[sh -c 'test -p "%s" || mkfifo "%s"']], notify_path, notify_path)
         os.execute(notify_create_cmd)
 
-        M.notify_handle = M.plugin_handle:spawn_process("tail", {
+        P.notify_handle = P.plugin_handle:spawn_process("tail", {
             args = { "-f", notify_path },
-            on_output = handle_notify,
+            on_output = P.handle_notify,
         })
 
-        if not M.notify_handle then
-            M.plugin_handle:error("couldn't spawn notify listener -- aborting plugin setup")
-            M.camera_server_handle:kill()
+        if not P.notify_handle then
+            P.plugin_handle:error("couldn't spawn notify listener -- aborting plugin setup")
+            P.camera_server_handle:kill()
             return
         end
 
         for camera = 1, cameras do
-            -- local camera = camera_
-            M.slot_active_states[camera] = false
-            local module_handle = M.plugin_handle:register_module("camera-" .. camera)
-            M.camera_modules[camera] = module_handle
-            module_handle:set_status(STATUS_INACTIVE)
-            module_handle:register_action("start", function()
-                module_handle:info("start action")
-
-                local token
-                if M.generate_secure_tokens then
-                    token = api.generate_token(20)
-                else
-                    token = "token"
-                end
-
-                M.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
-                module_handle:set_status(STATUS_WAITING)
-
-                local sender_link = string.format("%s?slot=%d&room=%d&token=%s", M.sender_base_url, camera - 1, janus_room, token)
-                local sender_message = generate_sender_message(sender_link)
-                module_handle:info(sender_message)
-                module_handle:set_message(sender_message)
-            end)
-            module_handle:register_action("stop", function()
-                module_handle:info("stop action")
+            -- local camera = camera
+            P.slot_active_states[camera] = false
+            local module_handle = P.plugin_handle:register_module("camera-" .. camera)
+            if module_handle then
+                P.camera_modules[camera] = module_handle
                 module_handle:set_status(STATUS_INACTIVE)
-                module_handle:set_message(nil)
-                M.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
-            end)
-            module_handle:register_action("hide", function()
-                module_handle:info("hide action")
-                if M.camera_handles[camera] then
-                    M.camera_handles[camera]:hide()
-                end
-            end)
-            module_handle:register_action("max", function()
-                module_handle:info("max action")
-                if M.camera_handles[camera] then
-                    M.camera_handles[camera]:max({ 1200, 900 })
-                end
-            end)
-            module_handle:register_action("min", function()
-                module_handle:info("min action")
-                if M.camera_handles[camera] then
-                    M.camera_handles[camera]:min()
-                end
-            end)
+                module_handle:register_action("start", function()
+                    module_handle:info("start action")
+
+                    local token
+                    if P.generate_secure_tokens then
+                        token = api.generate_token(20)
+                    else
+                        token = "token"
+                    end
+
+                    P.camera_server_handle:writeln("activate_slot " .. (camera - 1) .. " " .. token)
+                    module_handle:set_status(STATUS_WAITING)
+
+                    local sender_link = string.format(
+                        "%s?slot=%d&room=%d&token=%s",
+                        P.sender_base_url, camera - 1, janus_room, token
+                    )
+                    local sender_message = P.generate_sender_message(sender_link)
+                    module_handle:info(sender_message)
+                    module_handle:set_message(sender_message)
+                end)
+                module_handle:register_action("stop", function()
+                    module_handle:info("stop action")
+                    module_handle:set_status(STATUS_INACTIVE)
+                    module_handle:set_message(nil)
+                    P.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
+                end)
+                module_handle:register_action("hide", function()
+                    module_handle:info("hide action")
+                    if P.camera_handles[camera] then
+                        P.camera_handles[camera]:hide()
+                    end
+                end)
+                module_handle:register_action("max", function()
+                    module_handle:info("max action")
+                    if P.camera_handles[camera] then
+                        P.camera_handles[camera]:max({ 1200, 900 })
+                    end
+                end)
+                module_handle:register_action("min", function()
+                    module_handle:info("min action")
+                    if P.camera_handles[camera] then
+                        P.camera_handles[camera]:min()
+                    end
+                end)
+            end
         end
     end
-
 end
 
-return M
+return { setup = setup }
