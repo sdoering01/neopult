@@ -16,7 +16,12 @@
     let reconnectUpdateInterval;
 
     const socketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
-    const socketAddress = `${socketProtocol}//${window.location.host}/ws`;
+    let socketPath = window.location.pathname;
+    if (!socketPath.endsWith('/')) {
+        socketPath += '/';
+    }
+    socketPath += 'ws';
+    const socketAddress = `${socketProtocol}//${window.location.host}${socketPath}`;
     let socket;
 
     let requestId = 1;
