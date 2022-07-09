@@ -18,6 +18,11 @@
     const socketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
     let socketPath = window.location.pathname;
     if (!socketPath.endsWith('/')) {
+        if (socketPath.endsWith('.html')) {
+            const parts = socketPath.split('/');
+            parts.pop();
+            socketPath = parts.join('/');
+        }
         socketPath += '/';
     }
     socketPath += 'ws';
