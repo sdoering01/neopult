@@ -96,7 +96,7 @@ channel_setup() {
     done
 
     echo "Giving ownership of files in neopult home to user $NEOPULT_USER"
-    find $NEOPULT_HOME -exec chown $NEOPULT_USER:$NEOPULT_USER {} \;
+    chown -R $NEOPULT_USER:$NEOPULT_USER $NEOPULT_HOME
 
     echo
     echo "NOTE: Please review the default init.lua in $CHANNEL_DEFAULTS_DIR"
