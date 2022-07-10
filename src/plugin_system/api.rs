@@ -464,7 +464,7 @@ impl ModuleHandle {
         let mut module_status = self.module.status.write().unwrap();
         *module_status = status.clone();
 
-        let send_result = self
+        let _ = self
             .ctx
             .notification_sender
             .send(Notification::ModuleStatusUpdate {
@@ -474,13 +474,6 @@ impl ModuleHandle {
                 },
                 new_status: status,
             });
-
-        if let Err(e) = send_result {
-            self.module.error(format!(
-                "error when broadcasting module status update: {}",
-                e
-            ));
-        }
 
         Ok(())
     }
@@ -496,7 +489,7 @@ impl ModuleHandle {
         let mut module_message = self.module.message.write().unwrap();
         *module_message = message.clone();
 
-        let send_result = self
+        let _ = self
             .ctx
             .notification_sender
             .send(Notification::ModuleMessageUpdate {
@@ -506,13 +499,6 @@ impl ModuleHandle {
                 },
                 new_message: message,
             });
-
-        if let Err(e) = send_result {
-            self.module.error(format!(
-                "error when broadcasting module message update: {}",
-                e
-            ));
-        }
 
         Ok(())
     }
