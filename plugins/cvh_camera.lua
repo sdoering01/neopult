@@ -6,6 +6,7 @@ local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
+
 local function setup(args)
     local P = {
         camera_modules = {},
@@ -82,6 +83,11 @@ local function setup(args)
     local janus_room_pin = args.janus_room_pin or "default"
     local janus_bitrate = args.janus_bitrate or 128000
     local janus_admin_key = args.janus_admin_key or "secret"
+    local ping_janus = true
+
+    if args.ping_janus == false then
+        ping_janus = false
+    end
 
     if args.generate_secure_tokens == false then
         P.generate_secure_tokens = false
@@ -99,9 +105,11 @@ local function setup(args)
     end
     P.sender_base_url = args.sender_base_url
 
-    local janus_online_cmd = string.format([[curl --location --silent --fail --request POST --data '{"janus":"ping","transaction":"foobar"}' %s >/dev/null]], janus_url)
-    if os.execute(janus_online_cmd) ~= 0 then
-        error("janus can't be reached under the provided `janus_url`, try starting it on this system (e.g. `systemctl start janus`), make sure that janus.transport.http.jcfg is configured correctly")
+    if ping_janus ~= false then
+        local janus_online_cmd = string.format([[curl --location --silent --fail --request POST --data '{"janus":"ping","transaction":"foobar"}' %s >/dev/null]], janus_url)
+        if os.execute(janus_online_cmd) ~= 0 then
+            error("janus can't be reached under the provided `janus_url`, try starting it on this system (e.g. `systemctl start janus`), make sure that janus.transport.http.jcfg is configured correctly")
+        end
     end
 
     P.plugin_handle = api.register_plugin_instance("cvh-camera")
