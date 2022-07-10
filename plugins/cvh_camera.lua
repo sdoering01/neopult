@@ -90,11 +90,19 @@ local function setup(args)
     if args.camera_server_path == nil then
         error("cvh_camera plugin setup called without mandatory `camera_server_path` parameter")
     end
+    if os.execute("test -f " .. args.camera_server_path) ~= 0 then
+        error("`camera_server_path` parameter points to non-existent file, please change it to the entry point (e.g. `server.js`) of the cvh-camera camera server dist/ directory and make sure that the noepult user can access it")
+    end
 
     if args.sender_base_url == nil then
         error("cvh_camera plugin setup called without mandatory `sender_base_url` parameter")
     end
     P.sender_base_url = args.sender_base_url
+
+    local janus_online_cmd = string.format([[curl --location --silent --fail --request POST --data '{"janus":"ping","transaction":"foobar"}' %s >/dev/null]], janus_url)
+    if os.execute(janus_online_cmd) ~= 0 then
+        error("janus can't be reached under the provided `janus_url`, try starting it on this system (e.g. `systemctl start janus`), make sure that janus.transport.http.jcfg is configured correctly")
+    end
 
     P.plugin_handle = api.register_plugin_instance("cvh-camera")
     if P.plugin_handle then
