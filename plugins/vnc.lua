@@ -50,9 +50,14 @@ local function setup(args)
     args = args or {}
 
     local listen = args.listen
+    local listen_base_url = args.listen_base_url
 
     if listen == nil then
         error("vnc plugin setup called without mandatory `listen` parameter")
+    end
+
+    if listen_base_url == nil then
+        error("vnc plugin setup called without mandatory `listen_base_url` parameter")
     end
 
     log.debug("vnc module setup")
@@ -75,7 +80,7 @@ local function setup(args)
                     P.module_handle:set_status(STATUS_WAITING)
 
                     local port = 5500 + listen
-                    local address = "127.0.0.1:" .. port
+                    local address = listen_base_url .. ":" .. port
                     local message = "with a vnc client connect to " .. address
                     P.module_handle:info(message)
                     P.module_handle:set_message(message)

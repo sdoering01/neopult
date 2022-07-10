@@ -8,7 +8,13 @@ require("cvh_camera").setup({
     cameras = 2,
     janus_room_pin = "testcvh",
 })
-require("vnc").setup({ listen = 2 * channel })
-require("vnc").setup({ listen = 2 * channel + 1 })
--- require("xapps").setup()
--- require("output").setup()
+
+local listen_base_url = "127.0.0.1"
+require("vnc").setup({
+    listen = 2 * channel,
+    listen_base_url = listen_base_url
+})
+require("vnc").setup({
+    listen = 2 * channel + 1,
+    listen_base_url = listen_base_url
+})
