@@ -71,6 +71,18 @@ pub struct AlignedGeometry {
     alignment: Alignment,
 }
 
+impl Default for AlignedGeometry {
+    fn default() -> Self {
+        AlignedGeometry {
+            x_offset: 0,
+            y_offset: 0,
+            width: 480,
+            height: 360,
+            alignment: Alignment::BottomRight,
+        }
+    }
+}
+
 impl FromStr for AlignedGeometry {
     type Err = anyhow::Error;
 
@@ -169,13 +181,7 @@ pub enum MinGeometry {
 
 impl Default for MinGeometry {
     fn default() -> Self {
-        MinGeometry::Fixed(AlignedGeometry {
-            x_offset: 0,
-            y_offset: 0,
-            width: 480,
-            height: 360,
-            alignment: Alignment::BottomRight,
-        })
+        MinGeometry::Fixed(Default::default())
     }
 }
 
@@ -189,11 +195,36 @@ impl FromStr for MinGeometry {
 }
 
 impl MinGeometry {
-    fn get_geometry(&self, _lua: &Lua) -> AlignedGeometry {
+    fn get_geometry(&self, lua: &Lua) -> AlignedGeometry {
         match self {
             MinGeometry::Fixed(aligned_geometry) => *aligned_geometry,
-            // TODO: Call lua function to get geometry
-            MinGeometry::Dynamic { callback_key: _ } => todo!(),
+            MinGeometry::Dynamic { callback_key } => {
+                match lua.registry_value::<Function>(&callback_key) {
+                    Ok(min_geometry_cb) => match min_geometry_cb.call::<_, String>(()) {
+                        Ok(min_geometry_str) => match min_geometry_str.parse() {
+                            Ok(aligned_geometry) => {
+                                debug!("min geometry callback returned aligned_geometry {:?}", aligned_geometry);
+                                aligned_geometry
+                            },
+                            Err(e) => {
+                                error!("error while parsing min geometry from callback: {:?}", e);
+                                Default::default()
+                            }
+                        },
+                        Err(e) => {
+                            error!("error while calling min geometry callback: {:?}", e);
+                                Default::default()
+                        }
+                    },
+                    Err(e) => {
+                        error!(
+                            "couldn't get min geometry callback from lua registry: {:?}",
+                            e
+                        );
+                        Default::default()
+                    }
+                }
+            }
         }
     }
 }

@@ -210,6 +210,35 @@ impl PluginInstanceHandle {
         lua.pack(process_handle)
     }
 
+    fn get_min_geometry_from_value(
+        &self,
+        lua: &Lua,
+        min_geometry_val: Value,
+    ) -> mlua::Result<MinGeometry> {
+        let mut min_geometry = Default::default();
+        match min_geometry_val {
+            Value::String(min_geometry_str) => match min_geometry_str.to_string_lossy().parse() {
+                Ok(parsed) => min_geometry = parsed,
+                Err(e) => {
+                    self.plugin_instance.warn(format!(
+                        "invalid geometry string for window (using default): {}",
+                        e
+                    ));
+                }
+            },
+            Value::Function(min_geometry_fn) => {
+                let key = lua.create_registry_value(min_geometry_fn)?;
+                min_geometry = MinGeometry::Dynamic {
+                    callback_key: Arc::new(key),
+                }
+            }
+            _ => {
+                error!("unexpected value for min_geometry");
+            }
+        };
+        Ok(min_geometry)
+    }
+
     fn claim_window<'lua>(
         &self,
         lua: &'lua Lua,
@@ -227,16 +256,8 @@ impl PluginInstanceHandle {
             if let Ok(timeout) = opts_table.get::<_, u64>("timeout_ms") {
                 timeout_ms = timeout;
             }
-            if let Ok(min_geometry_str) = opts_table.get::<_, String>("min_geometry") {
-                match min_geometry_str.parse() {
-                    Ok(parsed) => min_geometry = parsed,
-                    Err(e) => {
-                        self.plugin_instance.warn(format!(
-                            "invalid geometry string for window with class {} (using default): {}",
-                            class, e
-                        ));
-                    }
-                };
+            if let Ok(min_geometry_val) = opts_table.get::<_, Value>("min_geometry") {
+                min_geometry = self.get_min_geometry_from_value(lua, min_geometry_val)?;
             }
             if let Ok(ignore_managed_arg) = opts_table.get::<_, bool>("ignore_managed") {
                 ignore_managed = ignore_managed_arg;
@@ -340,16 +361,8 @@ impl PluginInstanceHandle {
         };
 
         let mut min_geometry = MinGeometry::default();
-        if let Ok(min_geometry_str) = opts.get::<_, String>("min_geometry") {
-            match min_geometry_str.parse() {
-                Ok(parsed) => min_geometry = parsed,
-                Err(e) => {
-                    self.plugin_instance.warn(format!(
-                        "could not parse min_geomety when creating virtual window with name {} (using default): {}",
-                        name, e
-                    ));
-                }
-            };
+        if let Ok(min_geometry_val) = opts.get::<_, Value>("min_geometry") {
+            min_geometry = self.get_min_geometry_from_value(lua, min_geometry_val)?;
         }
 
         let mut primary_demotion_action = PrimaryDemotionAction::default();
