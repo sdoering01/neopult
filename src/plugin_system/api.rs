@@ -232,6 +232,7 @@ impl PluginInstanceHandle {
                     callback_key: Arc::new(key),
                 }
             }
+            Value::Nil => {}
             _ => {
                 error!("unexpected value for min_geometry");
             }
