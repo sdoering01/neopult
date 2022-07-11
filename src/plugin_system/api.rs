@@ -6,9 +6,9 @@ use crate::window_manager::{
     ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
 };
 use ::log::{debug, error};
-use mlua::{Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
+use mlua::{AnyUserData, Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 use rand::distributions::{Alphanumeric, DistString};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::thread;
@@ -689,6 +689,77 @@ impl UserData for WindowHandle {
     }
 }
 
+#[derive(Debug)]
+struct Store {
+    subscriber_callbacks: HashSet<Arc<RegistryKey>>,
+}
+
+impl Store {
+    fn new() -> Self {
+        Self {
+            subscriber_callbacks: HashSet::new(),
+        }
+    }
+}
+
+impl UserData for Store {
+    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_function("get", |_lua, store: AnyUserData| {
+            store.get_user_value::<Value>()
+        });
+
+        methods.add_function("set", |lua, (store, value): (AnyUserData, Value)| {
+            store.set_user_value(value.clone())?;
+            let mut callbacks = vec![];
+            for cb_key in &store.borrow::<Store>()?.subscriber_callbacks {
+                if let Ok(cb) = lua.registry_value::<Function>(cb_key) {
+                    callbacks.push(cb);
+                };
+            }
+            // Call callbacks outside of store borrow, so that callbacks can call unscubscribe
+            for cb in callbacks {
+                if let Err(e) = cb.call::<_, Value>(value.clone()) {
+                    error!("error in store subscriber callback: {:?}", e);
+                }
+            }
+            Ok(())
+        });
+
+        methods.add_function("subscribe", |lua, (store, cb): (AnyUserData, Function)| {
+            let cb_key = Arc::new(lua.create_registry_value(cb)?);
+            store
+                .borrow_mut::<Store>()?
+                .subscriber_callbacks
+                .insert(cb_key.clone());
+            Ok(StoreSubscription::new(cb_key))
+        });
+
+        methods.add_function(
+            "unsubscribe",
+            |_lua, (store, subscription): (AnyUserData, StoreSubscription)| {
+                store
+                    .borrow_mut::<Store>()?
+                    .subscriber_callbacks
+                    .remove(&subscription.callback_key);
+                Ok(())
+            },
+        );
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StoreSubscription {
+    callback_key: Arc<RegistryKey>,
+}
+
+impl StoreSubscription {
+    fn new(callback_key: Arc<RegistryKey>) -> Self {
+        Self { callback_key }
+    }
+}
+
+impl UserData for StoreSubscription {}
+
 fn register_plugin_instance<'lua>(
     lua: &'lua Lua,
     (name, opts): (String, Value),
@@ -734,6 +805,12 @@ fn get_channel_home(_lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<
     Ok(ctx.config.channel_home.display().to_string())
 }
 
+fn create_store<'lua>(lua: &'lua Lua, value: Value<'lua>) -> mlua::Result<AnyUserData<'lua>> {
+    let store: mlua::AnyUserData = lua.create_userdata(Store::new())?;
+    store.set_user_value(value)?;
+    Ok(store)
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -755,7 +832,11 @@ pub(super) fn inject_api_functions(
     )?;
     api.set(
         "get_channel_home",
-        create_context_function(lua, ctx, get_channel_home)?,
+        create_context_function(lua, ctx.clone(), get_channel_home)?,
+    )?;
+    api.set(
+        "create_store",
+        lua.create_function(move |lua, args| create_store(lua, args))?,
     )?;
 
     neopult.set("api", api)?;
