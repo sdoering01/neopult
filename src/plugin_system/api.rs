@@ -824,6 +824,14 @@ fn create_store<'lua>(lua: &'lua Lua, value: Value<'lua>) -> mlua::Result<AnyUse
     Ok(store)
 }
 
+fn reposition_windows(lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<()> {
+    let mut wm = ctx.window_manager.write().unwrap();
+    if let Err(e) = wm.reposition_windows(lua) {
+        error!("error when repositioning windows: {}", e);
+    }
+    Ok(())
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -850,6 +858,10 @@ pub(super) fn inject_api_functions(
     api.set(
         "create_store",
         lua.create_function(move |lua, args| create_store(lua, args))?,
+    )?;
+    api.set(
+        "reposition_windows",
+        create_context_function(lua, ctx.clone(), reposition_windows)?,
     )?;
 
     neopult.set("api", api)?;

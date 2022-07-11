@@ -635,6 +635,43 @@ impl WindowManager {
         Ok(())
     }
 
+    pub fn reposition_windows(&mut self, lua: &Lua) -> anyhow::Result<()> {
+        if let Some(primary_window_id) = self.primary_window {
+            let primary_window = self
+                .managed_windows
+                .get(&primary_window_id)
+                .expect("primary window is not a managed window");
+            match primary_window.mode {
+                Mode::Max { width, height, .. } => {
+                    self.change_window_geometry(
+                        lua,
+                        primary_window,
+                        AlignedGeometry::from_width_height(width, height),
+                        MAX_Z,
+                    )?;
+                    self.change_screen_resolution((width, height))?;
+                }
+                Mode::Min | Mode::Hidden => {
+                    anyhow::bail!("primary window isn't in max mode");
+                }
+            }
+        }
+
+        // TODO: Define some kind of z-order to handle overlapping min windows
+        for window in self.managed_windows.values() {
+            if window.mode == Mode::Min {
+                self.change_window_geometry(
+                    lua,
+                    window,
+                    window.min_geometry.get_geometry(lua),
+                    MIN_Z,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
     fn ensure_managed(&self, id: ManagedWid) -> anyhow::Result<()> {
         if self.managed_windows.contains_key(&id) {
             Ok(())
@@ -700,43 +737,6 @@ impl WindowManager {
                 }
             },
         }
-        Ok(())
-    }
-
-    fn reposition_windows(&mut self, lua: &Lua) -> anyhow::Result<()> {
-        if let Some(primary_window_id) = self.primary_window {
-            let primary_window = self
-                .managed_windows
-                .get(&primary_window_id)
-                .expect("primary window is not a managed window");
-            match primary_window.mode {
-                Mode::Max { width, height, .. } => {
-                    self.change_window_geometry(
-                        lua,
-                        primary_window,
-                        AlignedGeometry::from_width_height(width, height),
-                        MAX_Z,
-                    )?;
-                    self.change_screen_resolution((width, height))?;
-                }
-                Mode::Min | Mode::Hidden => {
-                    anyhow::bail!("primary window isn't in max mode");
-                }
-            }
-        }
-
-        // TODO: Define some kind of z-order to handle overlapping min windows
-        for window in self.managed_windows.values() {
-            if window.mode == Mode::Min {
-                self.change_window_geometry(
-                    lua,
-                    window,
-                    window.min_geometry.get_geometry(lua),
-                    MIN_Z,
-                )?;
-            }
-        }
-
         Ok(())
     }
 
