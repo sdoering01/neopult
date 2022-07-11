@@ -1,11 +1,19 @@
 local api = neopult.api
+local log = neopult.log
 
-local DEFAULT_GEOMETRIES = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" }
 
 local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
+-- TODO: Define those in camera_mode plugin and require them here
+local CAMERAS_INSIDE = "cameras-inside"
+local CAMERAS_OUTSIDE = "cameras-outside"
+
+local DEFAULT_GEOMETRIES = {
+    [CAMERAS_INSIDE] = { "480x360-0-0", "480x360-0+0", "480x360+0+0", "480x360+0-0" },
+    [CAMERAS_OUTSIDE] = { "480x360-0-0", "480x360-480-0", "480x360-960-0", "480x360-1440-0" },
+}
 
 local function setup(args)
     local P = {
@@ -14,6 +22,7 @@ local function setup(args)
         camera_handles = {},
         sender_base_url = nil,
         generate_secure_tokens = true,
+        mode = CAMERAS_INSIDE,
     }
 
     P.generate_sender_message = function(sender_link)
@@ -48,7 +57,9 @@ local function setup(args)
                     P.camera_server_handle:writeln("hide " .. slot)
                 end,
                 primary_demotion_action = "make_min",
-                min_geometry = DEFAULT_GEOMETRIES[slot + 1]
+                min_geometry = function()
+                    return DEFAULT_GEOMETRIES[P.mode][slot + 1]
+                end,
             })
             P.plugin_handle:info("new feed on slot " .. slot)
             P.camera_modules[slot + 1]:set_status(STATUS_ACTIVE)
@@ -84,6 +95,12 @@ local function setup(args)
     local janus_bitrate = args.janus_bitrate or 128000
     local janus_admin_key = args.janus_admin_key or "secret"
     local ping_janus = true
+    local camera_mode_store = args.camera_mode_store
+
+    if cameras > 4 then
+        log.warn("cvh camera plugin currently supports only up to 4 cameras, setting cameras to 4")
+        cameras = 4
+    end
 
     if args.ping_janus == false then
         ping_janus = false
@@ -110,6 +127,13 @@ local function setup(args)
         if os.execute(janus_online_cmd) ~= 0 then
             error("janus can't be reached under the provided `janus_url`, try starting it on this system (e.g. `systemctl start janus`), make sure that janus.transport.http.jcfg is configured correctly")
         end
+    end
+
+    if camera_mode_store then
+        camera_mode_store:subscribe(function(new_mode)
+            P.mode = new_mode
+            api.reposition_windows()
+        end)
     end
 
     P.plugin_handle = api.register_plugin_instance("cvh-camera")

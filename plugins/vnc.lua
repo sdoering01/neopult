@@ -9,12 +9,18 @@ local STATUS_INACTIVE = "inactive"
 
 local VIEWER_BINARY = "ssvncviewer"
 
+-- TODO: Define those in camera_mode plugin and require them here
+local CAMERAS_INSIDE = "cameras-inside"
+local CAMERAS_OUTSIDE = "cameras-outside"
+local CAMERAS_OUTSIDE_HEIGHT_INCREASE = 360
+
 local function setup(args)
     local P = {
         plugin_handle = nil,
         module_handle = nil,
         window_handle = nil,
         resolution = nil,
+        height_increase = 0,
     }
 
     P.handle_line = function(line)
@@ -46,11 +52,18 @@ local function setup(args)
         end
     end
 
+    P.max_window = function()
+        if P.module_handle:get_status() == STATUS_ACTIVE then
+            P.window_handle:max({ P.resolution[1], P.resolution[2] + P.height_increase })
+        end
+    end
+
 
     args = args or {}
 
     local listen = args.listen
     local listen_base_url = args.listen_base_url
+    local camera_mode_store = args.camera_mode_store
 
     if listen == nil then
         error("vnc plugin setup called without mandatory `listen` parameter")
@@ -58,6 +71,18 @@ local function setup(args)
 
     if listen_base_url == nil then
         error("vnc plugin setup called without mandatory `listen_base_url` parameter")
+    end
+
+    if camera_mode_store then
+        camera_mode_store:subscribe(function(new_mode)
+            if new_mode == CAMERAS_INSIDE then
+                P.height_increase = 0
+            elseif new_mode == CAMERAS_OUTSIDE then
+                P.height_increase = CAMERAS_OUTSIDE_HEIGHT_INCREASE
+            end
+            -- TODO: Do only if window is primary window at the moment
+            P.max_window()
+        end)
     end
 
     log.debug("vnc module setup")
@@ -109,9 +134,7 @@ local function setup(args)
             end)
             P.module_handle:register_action("max", function()
                 P.module_handle:info("max action called")
-                if P.module_handle:get_status() == STATUS_ACTIVE then
-                    P.window_handle:max(P.resolution)
-                end
+                P.max_window()
             end)
             P.module_handle:register_action("hide", function()
                 P.module_handle:info("hide action called")
