@@ -848,10 +848,7 @@ fn reposition_windows(lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result
 
 fn run_later(lua: &Lua, func: Function, ctx: Arc<LuaContext>) -> mlua::Result<()> {
     let func_key = lua.create_registry_value(func)?;
-    let event_sender = ctx.event_sender.clone();
-    ctx.runtime.spawn(async move {
-        let _ = event_sender.send(Event::RunLater { func_key }).await;
-    });
+    ctx.run_later_tasks.lock().unwrap().push_back(func_key);
     Ok(())
 }
 

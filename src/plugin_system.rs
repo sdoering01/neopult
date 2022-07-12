@@ -5,9 +5,10 @@ use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     fmt::{self, Display, Formatter},
     io,
-    sync::{Arc, RwLock, Weak},
+    sync::{Arc, Mutex, RwLock, Weak},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -26,6 +27,7 @@ struct LuaContext {
     window_manager: RwLock<WindowManager>,
     shutdown_sender: broadcast::Sender<()>,
     plugin_shutdown_wait_sender: Weak<mpsc::Sender<()>>,
+    run_later_tasks: Mutex<VecDeque<RegistryKey>>,
 }
 
 trait LogWithPrefix {
@@ -91,9 +93,6 @@ pub enum Event {
         reply_sender: oneshot::Sender<SystemInfo>,
     },
     ClientCommand(ClientCommand),
-    RunLater {
-        func_key: RegistryKey,
-    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -393,6 +392,7 @@ pub fn start(
         // The context must not own the plugin shutdown wait sender because we won't be able to drop
         // every context reference on shutdown.
         plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
+        run_later_tasks: Mutex::new(VecDeque::new()),
     });
 
     inject_plugin_api(&lua, ctx.clone()).context("error when injecting plugin api")?;
@@ -430,6 +430,25 @@ fn event_loop(
     info!("starting event loop");
 
     loop {
+        // This adds the possibility to queue new "run later" tasks, inside a "run later" task. The
+        // newly added tasks will be executed before we block to receive an event.
+        loop {
+            let task = ctx.run_later_tasks.lock().unwrap().pop_front();
+            match task {
+                Some(func_key) => {
+                    if let Ok(func) = lua.registry_value::<Function>(&func_key) {
+                        if let Err(e) = func.call::<_, Value>(()) {
+                            error!("error when calling run_later function: {:?}", e);
+                        }
+                    }
+                    let _ = lua.remove_registry_value(func_key);
+                }
+                None => {
+                    break;
+                },
+            }
+        }
+
         let event_option = ctx.runtime.block_on({
             async {
                 tokio::select!(
@@ -541,13 +560,5 @@ fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {
                 let _ = error_sender.send(call_result);
             }
         },
-        Event::RunLater { func_key } => {
-            if let Ok(func) = lua.registry_value::<Function>(&func_key) {
-                if let Err(e) = func.call::<_, Value>(()) {
-                    error!("error when calling run_later function: {:?}", e);
-                }
-            }
-            let _ = lua.remove_registry_value(func_key);
-        }
     }
 }
