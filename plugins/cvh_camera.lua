@@ -25,6 +25,7 @@ local function setup(args)
         mode = CAMERAS_INSIDE,
         camera_visible_states = {},
         camera_mode_store = nil,
+        dynamic_camera_mode = true,
     }
 
     P.any_cameras_visible = function()
@@ -40,7 +41,7 @@ local function setup(args)
     P.update_camera_visible_state = function(camera, visible)
         P.camera_visible_states[camera] = visible
 
-        if P.camera_mode_store then
+        if P.camera_mode_store and P.dynamic_camera_mode then
             local state = P.camera_mode_store:get()
             local any_cameras_visible_before = state.any_cameras_visible
             local any_cameras_visible_after = P.any_cameras_visible()
@@ -140,7 +141,9 @@ local function setup(args)
     local janus_bitrate = args.janus_bitrate or 128000
     local janus_admin_key = args.janus_admin_key or "secret"
     local ping_janus = true
+
     local camera_mode_store = args.camera_mode_store
+    local dynamic_camera_mode = args.dynamic_camera_mode ~= false
 
     if cameras > 4 then
         log.warn("cvh camera plugin currently supports only up to 4 cameras, setting cameras to 4")
@@ -176,7 +179,14 @@ local function setup(args)
 
     if camera_mode_store then
         P.camera_mode_store = camera_mode_store
-        P.handle_camera_mode_update(camera_mode_store:get())
+        P.dynamic_camera_mode = dynamic_camera_mode
+
+        local state = camera_mode_store:get()
+        if not dynamic_camera_mode then
+            state.any_cameras_visible = true
+            camera_mode_store:set(state)
+        end
+        P.handle_camera_mode_update(state)
         camera_mode_store:subscribe(P.handle_camera_mode_update)
     end
 
