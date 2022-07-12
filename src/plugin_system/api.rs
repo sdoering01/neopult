@@ -840,6 +840,15 @@ fn reposition_windows(lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result
     Ok(())
 }
 
+fn run_later(lua: &Lua, func: Function, ctx: Arc<LuaContext>) -> mlua::Result<()> {
+    let func_key = lua.create_registry_value(func)?;
+    let event_sender = ctx.event_sender.clone();
+    ctx.runtime.spawn(async move {
+        let _ = event_sender.send(Event::RunLater { func_key }).await;
+    });
+    Ok(())
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -870,6 +879,10 @@ pub(super) fn inject_api_functions(
     api.set(
         "reposition_windows",
         create_context_function(lua, ctx.clone(), reposition_windows)?,
+    )?;
+    api.set(
+        "run_later",
+        create_context_function(lua, ctx.clone(), run_later)?,
     )?;
 
     neopult.set("api", api)?;

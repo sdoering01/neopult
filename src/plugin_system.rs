@@ -91,6 +91,9 @@ pub enum Event {
         reply_sender: oneshot::Sender<SystemInfo>,
     },
     ClientCommand(ClientCommand),
+    RunLater {
+        func_key: RegistryKey,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -538,5 +541,13 @@ fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {
                 let _ = error_sender.send(call_result);
             }
         },
+        Event::RunLater { func_key } => {
+            if let Ok(func) = lua.registry_value::<Function>(&func_key) {
+                if let Err(e) = func.call::<_, Value>(()) {
+                    error!("error when calling run_later function: {:?}", e);
+                }
+            }
+            let _ = lua.remove_registry_value(func_key);
+        }
     }
 }
