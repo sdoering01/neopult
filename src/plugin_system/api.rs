@@ -3,7 +3,7 @@ use crate::plugin_system::{
     ModuleMessage, ModuleStatus, Notification, PluginInstance,
 };
 use crate::window_manager::{
-    ManagedWid, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
+    ManagedWid, Margin, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
 };
 use ::log::{debug, error};
 use mlua::{AnyUserData, Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
@@ -613,44 +613,51 @@ struct WindowHandle {
 }
 
 impl WindowHandle {
-    fn max(&self, lua: &Lua, size: Value) -> mlua::Result<()> {
+    fn max(&self, lua: &Lua, (size_table, opts): (Table, Value)) -> mlua::Result<()> {
         self.plugin_instance.debug(format!(
             "setting mode of window with managed wid {} to max",
             self.id
         ));
 
-        let width;
-        let height;
-
-        match size {
-            Value::Table(size_table) => {
-                width = match size_table.get::<_, u16>(1) {
-                    Ok(w) => w,
-                    Err(e) => {
-                        self.plugin_instance
-                            .error(format!("couldn't get width: {}", e));
-                        return Ok(());
-                    }
-                };
-
-                height = match size_table.get::<_, u16>(2) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        self.plugin_instance
-                            .error(format!("couldn't get height: {}", e));
-                        return Ok(());
-                    }
-                };
-            }
-            _ => {
+        let width = match size_table.get::<_, u16>(1) {
+            Ok(w) => w,
+            Err(e) => {
                 self.plugin_instance
-                    .error("first argument of max isn't a table".to_string());
+                    .error(format!("couldn't get width: {}", e));
                 return Ok(());
+            }
+        };
+
+        let height = match size_table.get::<_, u16>(2) {
+            Ok(h) => h,
+            Err(e) => {
+                self.plugin_instance
+                    .error(format!("couldn't get height: {}", e));
+                return Ok(());
+            }
+        };
+
+        let mut margin = Margin::default();
+
+        if let Value::Table(opts_table) = opts {
+            if let Ok(margin_table) = opts_table.get::<_, Table>("margin") {
+                if let Ok(top) = margin_table.get::<_, u16>("top") {
+                    margin.top = top;
+                }
+                if let Ok(right) = margin_table.get::<_, u16>("right") {
+                    margin.right = right;
+                }
+                if let Ok(bottom) = margin_table.get::<_, u16>("bottom") {
+                    margin.bottom = bottom;
+                }
+                if let Ok(left) = margin_table.get::<_, u16>("left") {
+                    margin.left = left;
+                }
             }
         }
 
         let mut wm = self.ctx.window_manager.write().unwrap();
-        if let Err(e) = wm.max_window(lua, self.id, (width, height)) {
+        if let Err(e) = wm.max_window(lua, self.id, (width, height), margin) {
             self.plugin_instance
                 .error(format!("error setting window mode to max: {}", e));
         }

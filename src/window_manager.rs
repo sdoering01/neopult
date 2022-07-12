@@ -29,9 +29,18 @@ pub enum Mode {
         height: u16,
         /// The max window with the highest priority will be chosen as the primary window
         priority: u32,
+        margin: Margin,
     },
     Min,
     Hidden,
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
+pub struct Margin {
+    pub top: u16,
+    pub right: u16,
+    pub bottom: u16,
+    pub left: u16,
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -141,16 +150,6 @@ impl FromStr for AlignedGeometry {
 }
 
 impl AlignedGeometry {
-    fn from_width_height(width: u16, height: u16) -> Self {
-        AlignedGeometry {
-            x_offset: 0,
-            y_offset: 0,
-            width,
-            height,
-            alignment: Alignment::TopLeft,
-        }
-    }
-
     fn into_geometry(&self, wm: &WindowManager) -> Geometry {
         let (x, y) = match self.alignment {
             Alignment::TopLeft => (self.x_offset, self.y_offset),
@@ -203,9 +202,12 @@ impl MinGeometry {
                     Ok(min_geometry_cb) => match min_geometry_cb.call::<_, String>(()) {
                         Ok(min_geometry_str) => match min_geometry_str.parse() {
                             Ok(aligned_geometry) => {
-                                debug!("min geometry callback returned aligned_geometry {:?}", aligned_geometry);
+                                debug!(
+                                    "min geometry callback returned aligned_geometry {:?}",
+                                    aligned_geometry
+                                );
                                 aligned_geometry
-                            },
+                            }
                             Err(e) => {
                                 error!("error while parsing min geometry from callback: {:?}", e);
                                 Default::default()
@@ -213,7 +215,7 @@ impl MinGeometry {
                         },
                         Err(e) => {
                             error!("error while calling min geometry callback: {:?}", e);
-                                Default::default()
+                            Default::default()
                         }
                     },
                     Err(e) => {
@@ -505,6 +507,7 @@ impl WindowManager {
         lua: &Lua,
         id: ManagedWid,
         (width, height): (u16, u16),
+        margin: Margin,
     ) -> anyhow::Result<()> {
         self.ensure_managed(id)?;
 
@@ -523,6 +526,7 @@ impl WindowManager {
             width,
             height,
             priority: u32::MAX,
+            margin,
         };
         drop(window);
 
@@ -642,14 +646,24 @@ impl WindowManager {
                 .get(&primary_window_id)
                 .expect("primary window is not a managed window");
             match primary_window.mode {
-                Mode::Max { width, height, .. } => {
-                    self.change_window_geometry(
-                        lua,
-                        primary_window,
-                        AlignedGeometry::from_width_height(width, height),
-                        MAX_Z,
-                    )?;
-                    self.change_screen_resolution((width, height))?;
+                Mode::Max {
+                    width,
+                    height,
+                    margin,
+                    ..
+                } => {
+                    let aligned_geometry = AlignedGeometry {
+                        x_offset: margin.left,
+                        y_offset: margin.top,
+                        width,
+                        height,
+                        alignment: Alignment::TopLeft,
+                    };
+                    self.change_window_geometry(lua, primary_window, aligned_geometry, MAX_Z)?;
+                    self.change_screen_resolution((
+                        width + margin.left + margin.right,
+                        height + margin.top + margin.bottom,
+                    ))?;
                 }
                 Mode::Min | Mode::Hidden => {
                     anyhow::bail!("primary window isn't in max mode");
