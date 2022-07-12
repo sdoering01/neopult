@@ -699,6 +699,11 @@ impl WindowHandle {
         }
         Ok(())
     }
+
+    fn is_primary_window(&self) -> mlua::Result<bool> {
+        let wm = self.ctx.window_manager.read().unwrap();
+        Ok(wm.is_primary_window(self.id))
+    }
 }
 
 impl UserData for WindowHandle {
@@ -707,6 +712,7 @@ impl UserData for WindowHandle {
         methods.add_method("min", |lua, this, ()| this.min(lua));
         methods.add_method("hide", |lua, this, ()| this.hide(lua));
         methods.add_method("unclaim", |lua, this, ()| this.unclaim(lua));
+        methods.add_method("is_primary_window", |_lua, this, ()| this.is_primary_window());
     }
 }
 

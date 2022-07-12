@@ -686,6 +686,10 @@ impl WindowManager {
         Ok(())
     }
 
+    pub fn is_primary_window(&self, id: ManagedWid) -> bool {
+        self.primary_window == Some(id)
+    }
+
     fn ensure_managed(&self, id: ManagedWid) -> anyhow::Result<()> {
         if self.managed_windows.contains_key(&id) {
             Ok(())
