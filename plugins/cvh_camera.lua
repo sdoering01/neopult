@@ -23,7 +23,41 @@ local function setup(args)
         sender_base_url = nil,
         generate_secure_tokens = true,
         mode = CAMERAS_INSIDE,
+        camera_visible_states = {},
+        camera_mode_store = nil,
     }
+
+    P.any_cameras_visible = function()
+        for _, visible in ipairs(P.camera_visible_states) do
+            if visible then
+                return true
+            end
+        end
+
+        return false
+    end
+
+    P.update_camera_visible_state = function(camera, visible)
+        P.camera_visible_states[camera] = visible
+
+        if P.camera_mode_store then
+            local state = P.camera_mode_store:get()
+            local any_cameras_visible_before = state.any_cameras_visible
+            local any_cameras_visible_after = P.any_cameras_visible()
+            if not any_cameras_visible_before and any_cameras_visible_after then
+                api.run_later(function()
+                    state.any_cameras_visible = true
+                    P.camera_mode_store:set(state)
+                end)
+            end
+            if any_cameras_visible_before and not any_cameras_visible_after then
+                api.run_later(function()
+                    state.any_cameras_visible = false
+                    P.camera_mode_store:set(state)
+                end)
+            end
+        end
+    end
 
     P.generate_sender_message = function(sender_link)
         return "follow <a href=\"" .. sender_link .. "\" target=\"_blank\">this link</a> to the camera sender"
@@ -49,12 +83,15 @@ local function setup(args)
                         slot, alignment, x_offset, y_offset, width, height, z
                     )
                     P.camera_server_handle:writeln(cmd)
+                    P.update_camera_visible_state(slot + 1, true)
                 end,
                 map = function()
                     P.camera_server_handle:writeln("show " .. slot)
+                    P.update_camera_visible_state(slot + 1, true)
                 end,
                 unmap = function()
                     P.camera_server_handle:writeln("hide " .. slot)
+                    P.update_camera_visible_state(slot + 1, false)
                 end,
                 primary_demotion_action = "make_min",
                 min_geometry = function()
@@ -69,6 +106,7 @@ local function setup(args)
             P.slot_active_states[slot + 1] = false
             P.camera_handles[slot + 1]:unclaim()
             P.camera_handles[slot + 1] = nil
+            P.update_camera_visible_state(slot + 1, false)
             P.plugin_handle:info("removed feed on slot " .. slot)
             -- Only set status to waiting when status was active previously. This
             -- prevents overwriting an inactive status.
@@ -77,6 +115,13 @@ local function setup(args)
             end
         elseif type == "custom_name" then
             P.plugin_handle:warn("camera server custom_name messages are not handled yet")
+        end
+    end
+
+    P.handle_camera_mode_update = function(new_state)
+        if P.mode ~= new_state.mode then
+            P.mode = new_state.mode
+            api.reposition_windows()
         end
     end
 
@@ -130,10 +175,9 @@ local function setup(args)
     end
 
     if camera_mode_store then
-        camera_mode_store:subscribe(function(new_mode)
-            P.mode = new_mode
-            api.reposition_windows()
-        end)
+        P.camera_mode_store = camera_mode_store
+        P.handle_camera_mode_update(camera_mode_store:get())
+        camera_mode_store:subscribe(P.handle_camera_mode_update)
     end
 
     P.plugin_handle = api.register_plugin_instance("cvh-camera")
@@ -175,6 +219,7 @@ local function setup(args)
         for camera = 1, cameras do
             -- local camera = camera
             P.slot_active_states[camera] = false
+            P.camera_visible_states[camera] = false
             local module_handle = P.plugin_handle:register_module("camera-" .. camera)
             if module_handle then
                 P.camera_modules[camera] = module_handle

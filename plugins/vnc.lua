@@ -12,7 +12,7 @@ local VIEWER_BINARY = "ssvncviewer"
 -- TODO: Define those in camera_mode plugin and require them here
 local CAMERAS_INSIDE = "cameras-inside"
 local CAMERAS_OUTSIDE = "cameras-outside"
-local CAMERAS_OUTSIDE_HEIGHT_INCREASE = 360
+local CAMERAS_OUTSIDE_BOTTOM_MARGIN = 360
 
 local function setup(args)
     local P = {
@@ -20,8 +20,14 @@ local function setup(args)
         module_handle = nil,
         window_handle = nil,
         resolution = nil,
-        height_increase = 0,
+        bottom_margin = 0,
     }
+
+    P.max_window = function()
+        if P.module_handle and P.module_handle:get_status() == STATUS_ACTIVE then
+            P.window_handle:max(P.resolution, { margin = { bottom = P.bottom_margin }})
+        end
+    end
 
     P.handle_line = function(line)
         local cur_status = P.module_handle:get_status()
@@ -36,8 +42,8 @@ local function setup(args)
                 P.plugin_handle:debug("got new vnc feed with resolution " .. width .. "x" .. height)
                 P.window_handle = P.plugin_handle:claim_window("ssvncviewer", { timeout_ms = 1000 })
                 if P.window_handle then
-                    P.window_handle:max(P.resolution)
                     P.module_handle:set_status(STATUS_ACTIVE)
+                    P.max_window()
                 else
                     P.plugin_handle:error("got feed but could not claim window in time")
                 end
@@ -52,10 +58,18 @@ local function setup(args)
         end
     end
 
-    P.max_window = function()
-        if P.module_handle:get_status() == STATUS_ACTIVE then
-            P.window_handle:max({ P.resolution[1], P.resolution[2] + P.height_increase })
+    P.handle_camera_mode_update = function(new_state)
+        if new_state.mode == CAMERAS_INSIDE then
+            P.bottom_margin = 0
+        elseif new_state.mode == CAMERAS_OUTSIDE then
+            if new_state.any_cameras_visible then
+                P.bottom_margin = CAMERAS_OUTSIDE_BOTTOM_MARGIN
+            else
+                P.bottom_margin = 0
+            end
         end
+        -- TODO: Do only if window is primary window at the moment
+        P.max_window()
     end
 
 
@@ -74,15 +88,8 @@ local function setup(args)
     end
 
     if camera_mode_store then
-        camera_mode_store:subscribe(function(new_mode)
-            if new_mode == CAMERAS_INSIDE then
-                P.height_increase = 0
-            elseif new_mode == CAMERAS_OUTSIDE then
-                P.height_increase = CAMERAS_OUTSIDE_HEIGHT_INCREASE
-            end
-            -- TODO: Do only if window is primary window at the moment
-            P.max_window()
-        end)
+        P.handle_camera_mode_update(camera_mode_store:get())
+        camera_mode_store:subscribe(P.handle_camera_mode_update)
     end
 
     log.debug("vnc module setup")
