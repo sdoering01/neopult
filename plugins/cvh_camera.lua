@@ -21,7 +21,6 @@ local function setup(args)
         slot_active_states = {},
         camera_handles = {},
         sender_base_url = nil,
-        generate_secure_tokens = true,
         mode = CAMERAS_INSIDE,
         camera_visible_states = {},
         camera_mode_store = nil,
@@ -140,7 +139,8 @@ local function setup(args)
     local janus_room_pin = args.janus_room_pin or "default"
     local janus_bitrate = args.janus_bitrate or 128000
     local janus_admin_key = args.janus_admin_key or "secret"
-    local ping_janus = true
+    local ping_janus = args.ping_janus ~= false
+    local generate_secure_tokens = args.generate_secure_tokens ~= false
 
     local camera_mode_store = args.camera_mode_store
     local dynamic_camera_mode = args.dynamic_camera_mode ~= false
@@ -148,14 +148,6 @@ local function setup(args)
     if cameras > 4 then
         log.warn("cvh camera plugin currently supports only up to 4 cameras, setting cameras to 4")
         cameras = 4
-    end
-
-    if args.ping_janus == false then
-        ping_janus = false
-    end
-
-    if args.generate_secure_tokens == false then
-        P.generate_secure_tokens = false
     end
 
     if args.camera_server_path == nil then
@@ -238,7 +230,7 @@ local function setup(args)
                     module_handle:info("start action")
 
                     local token
-                    if P.generate_secure_tokens then
+                    if generate_secure_tokens then
                         token = api.generate_token(20)
                     else
                         token = "token"
