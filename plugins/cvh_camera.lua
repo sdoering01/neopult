@@ -44,18 +44,18 @@ local function setup(args)
             local state = P.camera_mode_store:get()
             local any_cameras_visible_before = state.any_cameras_visible
             local any_cameras_visible_after = P.any_cameras_visible()
-            if not any_cameras_visible_before and any_cameras_visible_after then
-                api.run_later(function()
+            api.run_later(function()
+                if not any_cameras_visible_before and any_cameras_visible_after then
                     state.any_cameras_visible = true
-                    P.camera_mode_store:set(state)
-                end)
-            end
-            if any_cameras_visible_before and not any_cameras_visible_after then
-                api.run_later(function()
+                end
+                if any_cameras_visible_before and not any_cameras_visible_after then
                     state.any_cameras_visible = false
-                    P.camera_mode_store:set(state)
-                end)
-            end
+                end
+                -- Always call, so that vnc plugin can adjust margin, when
+                -- visibility doesn't change. For example, when camera goes from
+                -- max to min.
+                P.camera_mode_store:set(state)
+            end)
         end
     end
 

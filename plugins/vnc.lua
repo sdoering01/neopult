@@ -20,12 +20,14 @@ local function setup(args)
         module_handle = nil,
         window_handle = nil,
         resolution = nil,
-        bottom_margin = 0,
+        bottom_margin_should = 0,
+        bottom_margin_is = 0,
     }
 
     P.max_window = function()
         if P.module_handle and P.module_handle:get_status() == STATUS_ACTIVE then
-            P.window_handle:max(P.resolution, { margin = { bottom = P.bottom_margin }})
+            P.window_handle:max(P.resolution, { margin = { bottom = P.bottom_margin_should }})
+            P.bottom_margin_is = P.bottom_margin_should
         end
     end
 
@@ -60,16 +62,18 @@ local function setup(args)
 
     P.handle_camera_mode_update = function(new_state)
         if new_state.mode == CAMERAS_INSIDE then
-            P.bottom_margin = 0
+            P.bottom_margin_should = 0
         elseif new_state.mode == CAMERAS_OUTSIDE then
             if new_state.any_cameras_visible then
-                P.bottom_margin = CAMERAS_OUTSIDE_BOTTOM_MARGIN
+                P.bottom_margin_should = CAMERAS_OUTSIDE_BOTTOM_MARGIN
             else
-                P.bottom_margin = 0
+                P.bottom_margin_should = 0
             end
         end
-        -- TODO: Do only if window is primary window at the moment
-        P.max_window()
+
+        if P.window_handle and P.window_handle:is_primary_window() and P.bottom_margin_should ~= P.bottom_margin_is then
+            P.max_window()
+        end
     end
 
 
