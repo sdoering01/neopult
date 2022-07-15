@@ -1,13 +1,6 @@
 use log::{debug, error};
 use std::{env, path::PathBuf};
 
-#[derive(Debug)]
-pub struct Config {
-    pub channel: u8,
-    pub neopult_home: PathBuf,
-    pub channel_home: PathBuf,
-}
-
 pub const GLOBAL_DATA_DIR: &str = "/usr/local/share/neopult";
 
 pub const WEB_ROOT: &str = if cfg!(debug_assertions) {
@@ -26,6 +19,14 @@ const NEOPULT_HOME_ENV_KEY: &str = if cfg!(debug_assertions) {
 } else {
     "HOME"
 };
+
+#[derive(Debug)]
+pub struct Config {
+    pub channel: u8,
+    pub neopult_home: PathBuf,
+    pub channel_home: PathBuf,
+    pub websocket_password: String,
+}
 
 pub fn get_config() -> anyhow::Result<Config> {
     let channel_option = match env::var(CHANNEL_ENV_KEY) {
@@ -83,10 +84,14 @@ pub fn get_config() -> anyhow::Result<Config> {
         anyhow::bail!("channel home directory does not exist");
     }
 
+    // TODO: Read from somewhere else
+    let websocket_password = "admin".to_string();
+
     let config = Config {
         channel,
         neopult_home,
         channel_home,
+        websocket_password,
     };
     Ok(config)
 }

@@ -44,6 +44,7 @@ const CLOSE_MSG_AUTH_TIMEOUT: Message = Message::Close(Some(CloseFrame {
 struct WebContext {
     notification_sender: broadcast::Sender<Notification>,
     event_sender: mpsc::Sender<Event>,
+    websocket_password_hash: Vec<u8>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -117,9 +118,14 @@ pub async fn start(
     event_sender: mpsc::Sender<Event>,
     notification_sender: broadcast::Sender<Notification>,
 ) -> anyhow::Result<()> {
+    let websocket_password_hash = Sha256::new()
+        .chain_update(config.websocket_password.as_bytes())
+        .finalize();
+
     let ctx = Arc::new(WebContext {
         notification_sender,
         event_sender,
+        websocket_password_hash: websocket_password_hash.to_vec(),
     });
 
     let app = Router::new()
@@ -150,22 +156,19 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
     let (mut sender, mut receiver) = stream.split();
     let mut is_authenticated = false;
 
-    // TODO: Get password somehow else and hash it only once on server startup
-    let should_password = "admin";
     match time::timeout(AUTH_TIMEOUT, receiver.next()).await {
         Ok(msg) => match msg {
             Some(Ok(Message::Text(auth_msg))) => {
                 if let Some(got_password) = auth_msg.strip_prefix("Password ") {
-                    let should_hash = Sha256::new().chain_update(should_password).finalize();
                     let got_hash = Sha256::new().chain_update(got_password).finalize();
                     // Compare hashes of the passwords to prevent timing attacks
-                    if should_hash == got_hash {
+                    if *ctx.websocket_password_hash == *got_hash {
                         is_authenticated = true;
                     }
                 }
             }
             _ => {}
-        }
+        },
         Err(_) => {
             let _ = sender.send(CLOSE_MSG_AUTH_TIMEOUT).await;
             return;
