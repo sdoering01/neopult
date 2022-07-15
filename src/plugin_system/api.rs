@@ -1,18 +1,22 @@
-use crate::plugin_system::{
-    create_context_function, Action, Event, LogWithPrefix, LuaContext, Module, ModuleIdentifier,
-    ModuleMessage, ModuleStatus, Notification, PluginInstance,
-};
-use crate::window_manager::{
-    ManagedWid, Margin, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
+use crate::{
+    plugin_system::{
+        create_context_function, Action, Event, LogWithPrefix, LuaContext, Module,
+        ModuleIdentifier, ModuleMessage, ModuleStatus, Notification, PluginInstance,
+    },
+    window_manager::{
+        ManagedWid, Margin, MinGeometry, PrimaryDemotionAction, VirtualWindowCallbacks,
+    },
 };
 use ::log::{debug, error};
 use mlua::{AnyUserData, Function, Lua, RegistryKey, Table, UserData, UserDataMethods, Value};
 use rand::distributions::{Alphanumeric, DistString};
-use std::collections::{HashMap, HashSet};
-use std::process::Stdio;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    process::Stdio,
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
@@ -157,7 +161,7 @@ impl PluginInstanceHandle {
             }
         }
 
-        let callback_key = on_output_key.and_then(|key| Some(Arc::new(key)));
+        let callback_key = on_output_key.map(Arc::new);
         let child_stdout = child.stdout.take().unwrap();
         tokio::spawn(read_lines(
             child_stdout,
@@ -714,7 +718,9 @@ impl UserData for WindowHandle {
         methods.add_method("min", |lua, this, ()| this.min(lua));
         methods.add_method("hide", |lua, this, ()| this.hide(lua));
         methods.add_method("unclaim", |lua, this, ()| this.unclaim(lua));
-        methods.add_method("is_primary_window", |_lua, this, ()| this.is_primary_window());
+        methods.add_method("is_primary_window", |_lua, this, ()| {
+            this.is_primary_window()
+        });
     }
 }
 
@@ -877,18 +883,12 @@ pub(super) fn inject_api_functions(
         "get_channel_home",
         create_context_function(lua, ctx.clone(), get_channel_home)?,
     )?;
-    api.set(
-        "create_store",
-        lua.create_function(move |lua, args| create_store(lua, args))?,
-    )?;
+    api.set("create_store", lua.create_function(create_store)?)?;
     api.set(
         "reposition_windows",
         create_context_function(lua, ctx.clone(), reposition_windows)?,
     )?;
-    api.set(
-        "run_later",
-        create_context_function(lua, ctx.clone(), run_later)?,
-    )?;
+    api.set("run_later", create_context_function(lua, ctx, run_later)?)?;
 
     neopult.set("api", api)?;
 

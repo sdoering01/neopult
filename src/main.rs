@@ -15,6 +15,12 @@ mod window_manager;
 use plugin_system::{Event, Notification, PluginSystem};
 use window_manager::WindowManager;
 
+#[derive(Debug, Clone)]
+pub struct ShutdownChannels {
+    pub shutdown_sender: broadcast::Sender<()>,
+    pub shutdown_wait_sender: mpsc::Sender<()>,
+}
+
 async fn terminal_client(
     plugin_event_tx: mpsc::Sender<Event>,
     plugin_notification_tx: broadcast::Sender<Notification>,
@@ -82,6 +88,11 @@ fn main() -> Result<()> {
     let (shutdown_wait_tx, mut shutdown_wait_rx) = mpsc::channel::<()>(1);
     let (shutdown_tx, _) = broadcast::channel(1);
 
+    let shutdown_channels = ShutdownChannels {
+        shutdown_sender: shutdown_tx,
+        shutdown_wait_sender: shutdown_wait_tx,
+    };
+
     let wm = match WindowManager::init() {
         Ok(wm) => wm,
         Err(e) => {
@@ -97,8 +108,7 @@ fn main() -> Result<()> {
     let plugin_system = match PluginSystem::init(
         runtime.handle().clone(),
         env_config,
-        shutdown_tx.clone(),
-        shutdown_wait_tx.clone(),
+        shutdown_channels.clone(),
         plugin_event_tx.clone(),
         plugin_event_rx,
         plugin_notification_tx.clone(),
@@ -128,7 +138,7 @@ fn main() -> Result<()> {
             });
 
         // This must happen before waiting for shutdown or recv() will sleep forever
-        drop(shutdown_wait_tx);
+        drop(shutdown_channels.shutdown_wait_sender);
 
         tokio::select!(
             join_result = &mut plugin_system_handle => {
@@ -153,7 +163,7 @@ fn main() -> Result<()> {
             },
             _ = signal::ctrl_c() => {
                 println!("got ctrl-c, shutting down gracefully (press ctrl-c again to force shutdown)");
-                let _ = shutdown_tx.send(());
+                let _ = shutdown_channels.shutdown_sender.send(());
                 tokio::select!(
                     _ = shutdown_wait_rx.recv() => {}
                     _ = signal::ctrl_c() => {}

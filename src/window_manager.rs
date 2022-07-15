@@ -1,10 +1,12 @@
 use anyhow::Context;
 use log::{debug, error, warn};
 use mlua::{Function, Lua, RegistryKey, Value};
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::str::{self, FromStr};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    str::{self, FromStr},
+    sync::Arc,
+};
 use xcb::{randr, x, Connection, Xid};
 
 const MANAGED_HINT: &str = "MANAGED";
@@ -150,7 +152,7 @@ impl FromStr for AlignedGeometry {
 }
 
 impl AlignedGeometry {
-    fn into_geometry(&self, wm: &WindowManager) -> Geometry {
+    fn as_geometry(&self, wm: &WindowManager) -> Geometry {
         let (x, y) = match self.alignment {
             Alignment::TopLeft => (self.x_offset, self.y_offset),
             Alignment::TopRight => (wm.screen_width - self.width - self.x_offset, self.y_offset),
@@ -198,7 +200,7 @@ impl MinGeometry {
         match self {
             MinGeometry::Fixed(aligned_geometry) => *aligned_geometry,
             MinGeometry::Dynamic { callback_key } => {
-                match lua.registry_value::<Function>(&callback_key) {
+                match lua.registry_value::<Function>(callback_key) {
                     Ok(min_geometry_cb) => match min_geometry_cb.call::<_, String>(()) {
                         Ok(min_geometry_str) => match min_geometry_str.parse() {
                             Ok(aligned_geometry) => {
@@ -376,7 +378,7 @@ impl WindowManager {
 
         Ok(WindowManager {
             conn,
-            screen: screen.to_owned(),
+            screen,
             screen_height,
             screen_width,
             current_id: 0,
@@ -520,15 +522,17 @@ impl WindowManager {
             }
         });
 
-        let window = self.managed_windows.get_mut(&id).unwrap();
-        let was_hidden = window.mode == Mode::Hidden;
-        window.mode = Mode::Max {
-            width,
-            height,
-            priority: u32::MAX,
-            margin,
-        };
-        drop(window);
+        let was_hidden;
+        {
+            let window = self.managed_windows.get_mut(&id).unwrap();
+            was_hidden = window.mode == Mode::Hidden;
+            window.mode = Mode::Max {
+                width,
+                height,
+                priority: u32::MAX,
+                margin,
+            };
+        }
 
         if was_hidden {
             let window = self.managed_windows.get(&id).unwrap();
@@ -573,9 +577,12 @@ impl WindowManager {
     pub fn min_window(&mut self, lua: &Lua, id: ManagedWid) -> anyhow::Result<()> {
         self.ensure_managed(id)?;
 
-        let window = self.managed_windows.get_mut(&id).unwrap();
-        let was_hidden = window.mode == Mode::Hidden;
-        window.mode = Mode::Min;
+        let was_hidden;
+        {
+            let window = self.managed_windows.get_mut(&id).unwrap();
+            was_hidden = window.mode == Mode::Hidden;
+            window.mode = Mode::Min;
+        }
 
         if self.primary_window == Some(id) {
             debug!("primary window set to min, finding new primary window");
@@ -602,7 +609,6 @@ impl WindowManager {
         let window = self.managed_windows.get_mut(&id).unwrap();
         let was_shown = window.mode != Mode::Hidden;
         window.mode = Mode::Hidden;
-        drop(window);
 
         if was_shown {
             let window = self.managed_windows.get(&id).unwrap();
@@ -778,7 +784,7 @@ impl WindowManager {
     ) -> xcb::Result<()> {
         match &managed_window.variant {
             WindowVariant::XWindow { window } => {
-                let geometry = aligned_geometry.into_geometry(self);
+                let geometry = aligned_geometry.as_geometry(self);
                 self.conn.send_and_check_request(&x::ConfigureWindow {
                     window: *window,
                     value_list: &[

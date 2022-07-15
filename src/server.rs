@@ -1,5 +1,7 @@
-use crate::config::{Config, WEB_ROOT};
-use crate::plugin_system::{ActionIdentifier, ClientCommand, Event, Notification, SystemInfo};
+use crate::{
+    config::{Config, WEB_ROOT},
+    plugin_system::{ActionIdentifier, ClientCommand, Event, Notification, SystemInfo},
+};
 use axum::{
     extract::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
@@ -13,7 +15,6 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use sha2::{Digest, Sha256};
 use std::{borrow::Cow, io, net::SocketAddr, sync::Arc};
 use tokio::{
@@ -157,8 +158,8 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
     let mut is_authenticated = false;
 
     match time::timeout(AUTH_TIMEOUT, receiver.next()).await {
-        Ok(msg) => match msg {
-            Some(Ok(Message::Text(auth_msg))) => {
+        Ok(msg) => {
+            if let Some(Ok(Message::Text(auth_msg))) = msg {
                 if let Some(got_password) = auth_msg.strip_prefix("Password ") {
                     let got_hash = Sha256::new().chain_update(got_password).finalize();
                     // Compare hashes of the passwords to prevent timing attacks
@@ -167,8 +168,7 @@ async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
                     }
                 }
             }
-            _ => {}
-        },
+        }
         Err(_) => {
             let _ = sender.send(CLOSE_MSG_AUTH_TIMEOUT).await;
             return;

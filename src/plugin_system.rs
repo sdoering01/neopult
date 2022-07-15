@@ -1,5 +1,8 @@
-use crate::config::{Config, EnvConfig, GLOBAL_DATA_DIR};
-use crate::window_manager::WindowManager;
+use crate::{
+    config::{Config, EnvConfig, GLOBAL_DATA_DIR},
+    window_manager::WindowManager,
+    ShutdownChannels,
+};
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
@@ -343,8 +346,8 @@ where
 }
 
 fn inject_plugin_api(lua: &Lua, neopult: &Table, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
-    log::inject_log_functions(lua, &neopult).context("error when injecting log functions")?;
-    api::inject_api_functions(lua, &neopult, ctx).context("error when injecting api functions")?;
+    log::inject_log_functions(lua, neopult).context("error when injecting log functions")?;
+    api::inject_api_functions(lua, neopult, ctx).context("error when injecting api functions")?;
     Ok(())
 }
 
@@ -362,8 +365,7 @@ impl PluginSystem {
     pub fn init(
         main_runtime_handle: tokio::runtime::Handle,
         env_config: EnvConfig,
-        shutdown_tx: broadcast::Sender<()>,
-        shutdown_wait_tx: mpsc::Sender<()>,
+        shutdown_channels: ShutdownChannels,
         event_tx: mpsc::Sender<Event>,
         event_rx: mpsc::Receiver<Event>,
         notification_tx: broadcast::Sender<Notification>,
@@ -385,9 +387,9 @@ impl PluginSystem {
             let channel_path = env_config.channel_home.display().to_string();
             let mut neopult_lua_path = String::new();
             for path in [&channel_path, GLOBAL_DATA_DIR] {
-                neopult_lua_path += &format!(
-                    "{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;",
-                    path, path, path
+                neopult_lua_path = format!(
+                    "{}{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;",
+                    neopult_lua_path, path, path, path
                 );
             }
             package_table.set("path", neopult_lua_path + &lua_path)?;
@@ -401,7 +403,7 @@ impl PluginSystem {
             event_sender: Arc::new(event_tx),
             window_manager: RwLock::new(window_manager),
             notification_sender: Arc::new(notification_tx),
-            shutdown_sender: shutdown_tx,
+            shutdown_sender: shutdown_channels.shutdown_sender,
             // The context must not own the plugin shutdown wait sender because we won't be able to drop
             // every context reference on shutdown.
             plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
@@ -409,7 +411,8 @@ impl PluginSystem {
         });
 
         let neopult = lua.create_table()?;
-        inject_plugin_api(&lua, &neopult, ctx.clone()).context("error when injecting plugin api")?;
+        inject_plugin_api(&lua, &neopult, ctx.clone())
+            .context("error when injecting plugin api")?;
         config::inject_config_table(&lua, &neopult).context("error when injecting config table")?;
         lua.globals().set("neopult", neopult)?;
 
@@ -426,7 +429,7 @@ impl PluginSystem {
             lua,
             ctx,
             event_receiver: event_rx,
-            shutdown_wait_sender: shutdown_wait_tx,
+            shutdown_wait_sender: shutdown_channels.shutdown_wait_sender,
             plugin_shutdown_wait_receiver,
             plugin_shutdown_wait_sender,
         };
@@ -437,7 +440,7 @@ impl PluginSystem {
         let lua_config = config::get_config(&self.lua)?;
 
         let config = Config {
-            channel: self.ctx.env_config.channel.clone(),
+            channel: self.ctx.env_config.channel,
             neopult_home: self.ctx.env_config.neopult_home.clone(),
             channel_home: self.ctx.env_config.channel_home.clone(),
             websocket_password: lua_config.websocket_password,
@@ -537,15 +540,15 @@ fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {
             reply_sender,
         } => {
             if command == "actions" {
-                let actions = list_actions(&ctx);
+                let actions = list_actions(ctx);
                 let reply = actions.join("\n");
                 let _ = reply_sender.send(reply);
             } else if command == "statuses" {
-                let statuses = list_statuses(&ctx);
+                let statuses = list_statuses(ctx);
                 let reply = statuses.join("\n");
                 let _ = reply_sender.send(reply);
             } else if let Some(identifier) = command.strip_prefix("call ") {
-                match call_action_string(lua, &ctx, identifier) {
+                match call_action_string(lua, ctx, identifier) {
                     Ok(_) => {
                         let _ = reply_sender.send("action called successfully".to_string());
                     }
@@ -573,7 +576,7 @@ fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {
             }
         }
         Event::FetchSystemInfo { reply_sender } => {
-            let system_info = system_info(&ctx);
+            let system_info = system_info(ctx);
             if reply_sender.send(system_info).is_err() {
                 warn!("fetch system info: reply receiver was closed");
             }
@@ -583,7 +586,7 @@ fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {
                 identifier,
                 error_sender,
             } => {
-                let call_result = call_action(&lua, &ctx, identifier);
+                let call_result = call_action(lua, ctx, identifier);
                 let _ = error_sender.send(call_result);
             }
         },
