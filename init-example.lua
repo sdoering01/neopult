@@ -1,7 +1,12 @@
--- load plugins here
+local config = neopult.config
+-- Change this to your own password
+config.websocket_password = "neopult"
+
 local channel = neopult.api.get_channel()
+local camera_mode_store = neopult.api.create_store()
 
 require("channel_banner").setup({ resolution = { 1920, 1080 } })
+require("camera_mode").setup({ store = camera_mode_store })
 require("cvh_camera").setup({
     -- You might have to change this
     camera_server_path = "/usr/local/share/cvh-camera/camera-server/dist/server.js",
@@ -12,6 +17,7 @@ require("cvh_camera").setup({
     janus_room_pin = "testcvh",
     -- This has to match the admin key in the general block of janus.plugin.videoroom.jcfg and should REMAIN PRIVATE
     janus_admin_key = "secret",
+    camera_mode_store = camera_mode_store,
 })
 
 -- NOTE: Remember to allow tcp traffic on port 5500 + `listen` in your firewall
@@ -19,9 +25,11 @@ require("cvh_camera").setup({
 local listen_base_url = "your-domain.com"
 require("vnc").setup({
     listen = 2 * channel,
-    listen_base_url = listen_base_url
+    listen_base_url = listen_base_url,
+    camera_mode_store = camera_mode_store,
 })
 require("vnc").setup({
     listen = 2 * channel + 1,
-    listen_base_url = listen_base_url
+    listen_base_url = listen_base_url,
+    camera_mode_store = camera_mode_store,
 })
