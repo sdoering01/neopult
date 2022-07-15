@@ -2,7 +2,7 @@ use crate::config::{Config, WEB_ROOT};
 use crate::plugin_system::{ActionIdentifier, ClientCommand, Event, Notification, SystemInfo};
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
         Extension,
     },
     http::StatusCode,
@@ -14,7 +14,8 @@ use futures::{sink::SinkExt, stream::StreamExt};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::{io, net::SocketAddr, sync::Arc};
+use sha2::{Digest, Sha256};
+use std::{borrow::Cow, io, net::SocketAddr, sync::Arc};
 use tokio::{
     sync::{
         broadcast::{self, error::RecvError},
@@ -27,6 +28,17 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 // NOTE: Make sure to adjust the values in the client accordingly
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
+
+const CLOSE_MSG_AUTH: Message = Message::Close(Some(CloseFrame {
+    code: 1,
+    reason: Cow::Borrowed("auth"),
+}));
+const CLOSE_MSG_AUTH_TIMEOUT: Message = Message::Close(Some(CloseFrame {
+    code: 2,
+    reason: Cow::Borrowed("auth_timeout"),
+}));
 
 #[derive(Debug)]
 struct WebContext {
@@ -136,8 +148,34 @@ async fn websocket_handler(
 
 async fn websocket(stream: WebSocket, ctx: Arc<WebContext>) {
     let (mut sender, mut receiver) = stream.split();
+    let mut is_authenticated = false;
 
-    // Add auth here
+    // TODO: Get password somehow else and hash it only once on server startup
+    let should_password = "admin";
+    match time::timeout(AUTH_TIMEOUT, receiver.next()).await {
+        Ok(msg) => match msg {
+            Some(Ok(Message::Text(auth_msg))) => {
+                if let Some(got_password) = auth_msg.strip_prefix("Password ") {
+                    let should_hash = Sha256::new().chain_update(should_password).finalize();
+                    let got_hash = Sha256::new().chain_update(got_password).finalize();
+                    // Compare hashes of the passwords to prevent timing attacks
+                    if should_hash == got_hash {
+                        is_authenticated = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Err(_) => {
+            let _ = sender.send(CLOSE_MSG_AUTH_TIMEOUT).await;
+            return;
+        }
+    }
+
+    if !is_authenticated {
+        let _ = sender.send(CLOSE_MSG_AUTH).await;
+        return;
+    }
 
     let mut notification_receiver = ctx.notification_sender.subscribe();
     let event_sender = ctx.event_sender.clone();

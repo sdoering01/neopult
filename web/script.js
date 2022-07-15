@@ -8,12 +8,16 @@
     const RECONNECT_LABEL_INITIAL = 'Connect';
     const RECONNECT_LABEL = 'Reconnect';
 
+    const SOCKET_DISCONNECT_REASON_AUTH = 'auth';
+    const SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT = 'auth_timeout';
+
     let initialConnect = true;
     let reconnecting = false;
     let heartbeatTimeout;
     let reconnectTry;
     let reconnectTimeout;
     let reconnectUpdateInterval;
+    let password;
 
     const socketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
     let socketPath = window.location.pathname;
@@ -31,7 +35,12 @@
 
     let requestId = 1;
 
-    const appContainerEl = document.getElementById('app');
+    const authContainerEl = document.getElementById('auth-container');
+    const passwordFormEl = document.getElementById('password-form');
+    const passwordInputEl = document.getElementById('password-input');
+    const passwordSendButtonEl = document.getElementById('password-send-button');
+    const appContainerEl = document.getElementById('app-container');
+    const pluginContainerEl = document.getElementById('plugin-container');
     const statusEl = document.getElementById('status');
     const reconnectButtonEl = document.getElementById('reconnect-button');
     const moduleStatusElements = {};
@@ -71,6 +80,12 @@
         console.log('connect');
         socket = new WebSocket(socketAddress);
 
+        if (initialConnect) {
+            statusEl.innerText = 'Connecting';
+        } else {
+            statusEl.innerText = 'Reconnecting';
+        }
+
         socket.addEventListener('open', handleSocketOpen);
         socket.addEventListener('error', handleSocketError);
         socket.addEventListener('close', handleSocketClose);
@@ -84,7 +99,8 @@
         clearTimeout(reconnectTimeout);
         clearInterval(reconnectUpdateInterval);
         reconnectButtonEl.classList.add('hidden');
-        statusEl.innerText = 'Loading server state';
+        statusEl.innerText = 'Authenticating';
+        socket.send('Password ' + password);
     };
 
     const handleSocketMessage = (event) => {
@@ -104,6 +120,11 @@
         } else if (msg == 'pong') {
             heartbeat();
         } else if (msg.system_info) {
+            statusEl.innerText = 'Connected';
+
+            appContainerEl.classList.remove('hidden');
+            authContainerEl.classList.add('hidden');
+
             const containerEl = document.createElement('div');
             containerEl.classList.add('modules');
             for (const pluginInstance of msg.system_info.plugin_instances) {
@@ -152,9 +173,8 @@
                     moduleContainerEl.appendChild(moduleMessageEl);
                 }
             }
-            appContainerEl.innerHTML = '';
-            appContainerEl.appendChild(containerEl);
-            statusEl.innerText = 'Connected';
+            pluginContainerEl.innerHTML = '';
+            pluginContainerEl.appendChild(containerEl);
         } else if (msg.notification) {
             const notification = msg.notification;
             if (notification.module_status_update) {
@@ -175,34 +195,51 @@
 
     const handleSocketClose = (event) => {
         console.log('socket close', event);
-        handleDisconnect();
+        handleDisconnect(event.reason);
     };
 
     const disconnect = () => {
         socket.close();
-        handleDisconnect();
+        handleDisconnect('');
     };
 
-    const handleDisconnect = () => {
+    const handleDisconnect = (reason) => {
         socket.removeEventListener('open', handleSocketOpen);
         socket.removeEventListener('error', handleSocketError);
         socket.removeEventListener('close', handleSocketClose);
         socket.removeEventListener('message', handleSocketMessage);
 
-        appContainerEl.innerHTML = '';
+        pluginContainerEl.innerHTML = '';
         cancelHeartbeat();
 
-        if (initialConnect) {
-            statusEl.innerText = 'Connection failed';
+        let statusText;
+        if (reason === SOCKET_DISCONNECT_REASON_AUTH) {
+            statusText = 'Password incorrect';
+        } else if (reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
+            statusText = 'Socket authentication timed out';
         } else {
-            statusEl.innerText = 'Disconnected';
+            if (initialConnect) {
+                statusText = 'Connection failed';
+            } else {
+                statusText = 'Disconnected';
+            }
+        }
+        statusEl.innerText = statusText;
+
+        if (reason === SOCKET_DISCONNECT_REASON_AUTH || reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
+            passwordSendButtonEl.disabled = false;
+            appContainerEl.classList.add('hidden');
+            authContainerEl.classList.remove('hidden');
         }
 
-        if (reconnecting) {
-            reconnecting = false;
-            scheduleReconnect();
-        } else {
-            initReconnect();
+        const shouldReconnect = reason !== SOCKET_DISCONNECT_REASON_AUTH && reason !== SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT;
+        if (shouldReconnect) {
+            if (reconnecting) {
+                reconnecting = false;
+                scheduleReconnect();
+            } else {
+                initReconnect();
+            }
         }
     };
 
@@ -211,11 +248,6 @@
         clearTimeout(reconnectTimeout);
         clearInterval(reconnectUpdateInterval);
         window.removeEventListener('focus', reconnect);
-        if (initialConnect) {
-            statusEl.innerText = 'Connecting';
-        } else {
-            statusEl.innerText = 'Reconnecting';
-        }
         reconnecting = true;
         reconnectButtonEl.classList.add('hidden');
         connect();
@@ -249,8 +281,14 @@
         scheduleReconnect();
     };
 
-    reconnectButtonEl.addEventListener('click', reconnect);
+    const handlePasswordSubmit = (event) => {
+        event.preventDefault();
+        passwordSendButtonEl.disabled = true;
+        password = passwordInputEl.value;
+        passwordInputEl.value = '';
+        connect();
+    }
 
-    statusEl.innerText = 'Connecting';
-    connect();
+    reconnectButtonEl.addEventListener('click', reconnect);
+    passwordFormEl.addEventListener('submit', handlePasswordSubmit);
 })();
