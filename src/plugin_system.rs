@@ -459,23 +459,18 @@ impl PluginSystem {
         info!("starting event loop");
 
         loop {
-            // This adds the possibility to queue new "run later" tasks, inside a "run later" task. The
-            // newly added tasks will be executed before we block to receive an event.
-            loop {
-                let task = ctx.run_later_tasks.lock().unwrap().pop_front();
-                match task {
-                    Some(func_key) => {
-                        if let Ok(func) = lua.registry_value::<Function>(&func_key) {
-                            if let Err(e) = func.call::<_, Value>(()) {
-                                error!("error when calling run_later function: {:?}", e);
-                            }
-                        }
-                        let _ = lua.remove_registry_value(func_key);
-                    }
-                    None => {
-                        break;
+            // Inner block is necessary to drop the mutex guard, so that `run_later` can be called
+            // from inside `run_later` tasks.
+            while let Some(func_key) = {
+                let mut run_later_tasks = ctx.run_later_tasks.lock().unwrap();
+                run_later_tasks.pop_front()
+            } {
+                if let Ok(func) = lua.registry_value::<Function>(&func_key) {
+                    if let Err(e) = func.call::<_, Value>(()) {
+                        error!("error when calling run_later function: {:?}", e);
                     }
                 }
+                let _ = lua.remove_registry_value(func_key);
             }
 
             let event_option = ctx.plugin_runtime.block_on({
