@@ -210,6 +210,7 @@
         // For manual reconnecting
         clearTimeout(reconnectTimeout);
         clearInterval(reconnectUpdateInterval);
+        window.removeEventListener('focus', reconnect);
         if (initialConnect) {
             statusEl.innerText = 'Connecting';
         } else {
@@ -240,6 +241,7 @@
             reconnectIn -= 1000;
             updateReconnectButton(reconnectIn);
         }, 1000);
+        window.addEventListener('focus', reconnect);
     };
 
     const initReconnect = () => {
