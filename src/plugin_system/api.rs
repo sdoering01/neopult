@@ -58,6 +58,8 @@ impl PluginInstanceHandle {
         lua: &'lua Lua,
         (cmd, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
+        let _enter_guard = self.ctx.main_runtime_handle.enter();
+
         let mut args = Vec::<String>::new();
         let mut envs = HashMap::<String, String>::new();
         let mut on_output_key = None;
@@ -561,7 +563,7 @@ struct ProcessHandle {
 
 impl ProcessHandle {
     fn write(&mut self, _lua: &Lua, buf: String) -> mlua::Result<()> {
-        self.ctx.runtime.block_on(async {
+        self.ctx.plugin_runtime.block_on(async {
             if let Some(stdin) = self.child.lock().await.stdin.as_mut() {
                 stdin.write_all(buf.as_bytes()).await
             } else {
@@ -582,7 +584,7 @@ impl ProcessHandle {
     fn kill(&mut self) -> mlua::Result<()> {
         self.plugin_instance
             .debug(format!("killing process {} (PID {})", self.cmd, self.pid));
-        self.ctx.runtime.block_on(async {
+        self.ctx.plugin_runtime.block_on(async {
             let mut child = self.child.lock().await;
             match child.kill().await {
                 Ok(_) => {
@@ -825,11 +827,11 @@ fn generate_token(num_chars: u8) -> mlua::Result<String> {
 }
 
 fn get_channel(_lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<u8> {
-    Ok(ctx.config.channel)
+    Ok(ctx.env_config.channel)
 }
 
 fn get_channel_home(_lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<String> {
-    Ok(ctx.config.channel_home.display().to_string())
+    Ok(ctx.env_config.channel_home.display().to_string())
 }
 
 fn create_store<'lua>(lua: &'lua Lua, value: Value<'lua>) -> mlua::Result<AnyUserData<'lua>> {

@@ -21,6 +21,13 @@ const NEOPULT_HOME_ENV_KEY: &str = if cfg!(debug_assertions) {
 };
 
 #[derive(Debug)]
+pub struct EnvConfig {
+    pub channel: u8,
+    pub neopult_home: PathBuf,
+    pub channel_home: PathBuf,
+}
+
+#[derive(Debug)]
 pub struct Config {
     pub channel: u8,
     pub neopult_home: PathBuf,
@@ -28,7 +35,7 @@ pub struct Config {
     pub websocket_password: String,
 }
 
-pub fn get_config() -> anyhow::Result<Config> {
+pub fn get_env_config() -> anyhow::Result<EnvConfig> {
     let channel_option = match env::var(CHANNEL_ENV_KEY) {
         Ok(channel_str) => {
             debug!(
@@ -84,14 +91,10 @@ pub fn get_config() -> anyhow::Result<Config> {
         anyhow::bail!("channel home directory does not exist");
     }
 
-    // TODO: Read from somewhere else
-    let websocket_password = "admin".to_string();
-
-    let config = Config {
+    let config = EnvConfig {
         channel,
         neopult_home,
         channel_home,
-        websocket_password,
     };
     Ok(config)
 }

@@ -1,4 +1,6 @@
--- load plugins here
+local config = neopult.config
+config.websocket_password = "neopult"
+
 local channel = neopult.api.get_channel()
 local camera_mode_store = neopult.api.create_store()
 

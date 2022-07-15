@@ -1,4 +1,4 @@
-use crate::config::{Config, GLOBAL_DATA_DIR};
+use crate::config::{Config, EnvConfig, GLOBAL_DATA_DIR};
 use crate::window_manager::WindowManager;
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
@@ -13,14 +13,16 @@ use std::{
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 mod api;
+mod config;
 mod log;
 
 const SEPARATOR: &str = "::";
 
 #[derive(Debug)]
 struct LuaContext {
-    config: Arc<Config>,
-    runtime: tokio::runtime::Runtime,
+    env_config: Arc<EnvConfig>,
+    main_runtime_handle: tokio::runtime::Handle,
+    plugin_runtime: tokio::runtime::Runtime,
     plugin_instances: RwLock<Vec<Arc<PluginInstance>>>,
     event_sender: Arc<mpsc::Sender<Event>>,
     notification_sender: Arc<broadcast::Sender<Notification>>,
@@ -335,172 +337,202 @@ where
     R: ToLuaMulti<'callback>,
     // `mlua::create_function` uses the MaybeSend trait of the maybe_sync crate to impose the Sync
     // trait on the function only when the `async` feature of mlua is activated.
-    F: 'static + Fn(&'callback Lua, A, Arc<LuaContext>) -> mlua::Result<R>,
+    F: 'static + Fn(&'callback Lua, A, Arc<LuaContext>) -> mlua::Result<R> + Send,
 {
     lua.create_function(move |lua, lua_args| func(lua, lua_args, ctx.clone()))
 }
 
-fn inject_plugin_api(lua: &Lua, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
-    let neopult = lua.create_table()?;
-
+fn inject_plugin_api(lua: &Lua, neopult: &Table, ctx: Arc<LuaContext>) -> anyhow::Result<()> {
     log::inject_log_functions(lua, &neopult).context("error when injecting log functions")?;
     api::inject_api_functions(lua, &neopult, ctx).context("error when injecting api functions")?;
-
-    lua.globals().set("neopult", neopult)?;
     Ok(())
 }
 
-pub fn start(
-    config: Arc<Config>,
-    shutdown_tx: broadcast::Sender<()>,
-    shutdown_wait_tx: mpsc::Sender<()>,
-    event_tx: mpsc::Sender<Event>,
-    event_rx: mpsc::Receiver<Event>,
-    notification_tx: broadcast::Sender<Notification>,
-    window_manager: WindowManager,
-) -> anyhow::Result<()> {
-    let lua = Lua::new();
-
-    let (plugin_shutdown_wait_sender, plugin_shutdown_wait_receiver) = mpsc::channel::<()>(1);
-    let plugin_shutdown_wait_sender = Arc::new(plugin_shutdown_wait_sender);
-
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
-
-    let globals = lua.globals();
-
-    // Look for lua modules in the specified paths first
-    let package_table = globals.get::<_, Table>("package")?;
-    let lua_path: String = package_table.get("path")?;
-    let channel_path = config.channel_home.display().to_string();
-    let mut neopult_lua_path = String::new();
-    for path in [&channel_path, GLOBAL_DATA_DIR] {
-        neopult_lua_path += &format!(
-            "{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;",
-            path, path, path
-        );
-    }
-    package_table.set("path", neopult_lua_path + &lua_path)?;
-
-    let ctx = Arc::new(LuaContext {
-        config,
-        runtime,
-        plugin_instances: RwLock::new(Vec::new()),
-        event_sender: Arc::new(event_tx),
-        window_manager: RwLock::new(window_manager),
-        notification_sender: Arc::new(notification_tx),
-        shutdown_sender: shutdown_tx,
-        // The context must not own the plugin shutdown wait sender because we won't be able to drop
-        // every context reference on shutdown.
-        plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
-        run_later_tasks: Mutex::new(VecDeque::new()),
-    });
-
-    inject_plugin_api(&lua, ctx.clone()).context("error when injecting plugin api")?;
-
-    info!("loading plugins");
-
-    lua.load(r#"require("init")"#)
-        .set_name("init.lua")?
-        .exec()
-        .context("error when loading plugins")?;
-
-    info!("plugins loaded");
-
-    event_loop(
-        &lua,
-        ctx,
-        event_rx,
-        plugin_shutdown_wait_receiver,
-        plugin_shutdown_wait_sender,
-    )?;
-    drop(shutdown_wait_tx);
-
-    Ok(())
-}
-
-fn event_loop(
-    lua: &Lua,
+#[derive(Debug)]
+pub struct PluginSystem {
+    lua: Lua,
     ctx: Arc<LuaContext>,
-    mut event_receiver: mpsc::Receiver<Event>,
-    mut plugin_shutdown_wait_receiver: mpsc::Receiver<()>,
+    event_receiver: mpsc::Receiver<Event>,
+    shutdown_wait_sender: mpsc::Sender<()>,
+    plugin_shutdown_wait_receiver: mpsc::Receiver<()>,
     plugin_shutdown_wait_sender: Arc<mpsc::Sender<()>>,
-) -> io::Result<()> {
-    let mut shutdown_receiver = ctx.shutdown_sender.subscribe();
+}
 
-    info!("starting event loop");
+impl PluginSystem {
+    pub fn init(
+        main_runtime_handle: tokio::runtime::Handle,
+        env_config: EnvConfig,
+        shutdown_tx: broadcast::Sender<()>,
+        shutdown_wait_tx: mpsc::Sender<()>,
+        event_tx: mpsc::Sender<Event>,
+        event_rx: mpsc::Receiver<Event>,
+        notification_tx: broadcast::Sender<Notification>,
+        window_manager: WindowManager,
+    ) -> anyhow::Result<PluginSystem> {
+        let lua = Lua::new();
 
-    loop {
-        // This adds the possibility to queue new "run later" tasks, inside a "run later" task. The
-        // newly added tasks will be executed before we block to receive an event.
-        loop {
-            let task = ctx.run_later_tasks.lock().unwrap().pop_front();
-            match task {
-                Some(func_key) => {
-                    if let Ok(func) = lua.registry_value::<Function>(&func_key) {
-                        if let Err(e) = func.call::<_, Value>(()) {
-                            error!("error when calling run_later function: {:?}", e);
-                        }
-                    }
-                    let _ = lua.remove_registry_value(func_key);
-                }
-                None => {
-                    break;
-                },
+        let (plugin_shutdown_wait_sender, plugin_shutdown_wait_receiver) = mpsc::channel::<()>(1);
+        let plugin_shutdown_wait_sender = Arc::new(plugin_shutdown_wait_sender);
+
+        let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+
+        {
+            let globals = lua.globals();
+
+            // Look for lua modules in the specified paths first
+            let package_table = globals.get::<_, Table>("package")?;
+            let lua_path: String = package_table.get("path")?;
+            let channel_path = env_config.channel_home.display().to_string();
+            let mut neopult_lua_path = String::new();
+            for path in [&channel_path, GLOBAL_DATA_DIR] {
+                neopult_lua_path += &format!(
+                    "{}/?.lua;{}/plugins/?.lua;{}/plugins/?/init.lua;",
+                    path, path, path
+                );
             }
+            package_table.set("path", neopult_lua_path + &lua_path)?;
         }
 
-        let event_option = ctx.runtime.block_on({
-            async {
-                tokio::select!(
-                    event_option = event_receiver.recv() => event_option,
-                    _ = shutdown_receiver.recv() => {
-                        None
-                    }
-                )
-            }
+        let ctx = Arc::new(LuaContext {
+            env_config: Arc::new(env_config),
+            main_runtime_handle,
+            plugin_runtime: runtime,
+            plugin_instances: RwLock::new(Vec::new()),
+            event_sender: Arc::new(event_tx),
+            window_manager: RwLock::new(window_manager),
+            notification_sender: Arc::new(notification_tx),
+            shutdown_sender: shutdown_tx,
+            // The context must not own the plugin shutdown wait sender because we won't be able to drop
+            // every context reference on shutdown.
+            plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
+            run_later_tasks: Mutex::new(VecDeque::new()),
         });
 
-        // Handling the event must happen outside of the async runtime, so that non-async rust
-        // functions that are called from lua can call `block_on` on the runtime.
-        match event_option {
-            Some(event) => handle_event(lua, &ctx, event),
-            None => break,
+        let neopult = lua.create_table()?;
+        inject_plugin_api(&lua, &neopult, ctx.clone()).context("error when injecting plugin api")?;
+        config::inject_config_table(&lua, &neopult).context("error when injecting config table")?;
+        lua.globals().set("neopult", neopult)?;
+
+        info!("loading plugins");
+
+        lua.load(r#"require("init")"#)
+            .set_name("init.lua")?
+            .exec()
+            .context("error when loading plugins")?;
+
+        info!("plugins loaded");
+
+        let plugin_system = PluginSystem {
+            lua,
+            ctx,
+            event_receiver: event_rx,
+            shutdown_wait_sender: shutdown_wait_tx,
+            plugin_shutdown_wait_receiver,
+            plugin_shutdown_wait_sender,
         };
+        Ok(plugin_system)
     }
 
-    info!("event loop finished");
-    debug!("running plugin instance cleanup callbacks");
+    pub fn get_config(&self) -> anyhow::Result<Config> {
+        let lua_config = config::get_config(&self.lua)?;
 
-    ctx.plugin_instances
-        .read()
-        .unwrap()
-        .iter()
-        .for_each(|plugin_instance| {
-            if let Some(ref callback_key) = plugin_instance.on_cleanup {
-                match lua.registry_value::<Function>(callback_key) {
-                    Ok(callback) => {
-                        if let Err(e) = callback.call::<_, Value>(()) {
-                            plugin_instance
-                                .error(format!("error when calling cleanup callback: {:?}", e));
+        let config = Config {
+            channel: self.ctx.env_config.channel.clone(),
+            neopult_home: self.ctx.env_config.neopult_home.clone(),
+            channel_home: self.ctx.env_config.channel_home.clone(),
+            websocket_password: lua_config.websocket_password,
+        };
+
+        Ok(config)
+    }
+
+    pub fn event_loop(self) -> io::Result<()> {
+        let lua = self.lua;
+        let ctx = self.ctx;
+        let mut event_receiver = self.event_receiver;
+        let shutdown_wait_sender = self.shutdown_wait_sender;
+        let mut plugin_shutdown_wait_receiver = self.plugin_shutdown_wait_receiver;
+        let plugin_shutdown_wait_sender = self.plugin_shutdown_wait_sender;
+
+        let mut shutdown_receiver = ctx.shutdown_sender.subscribe();
+
+        info!("starting event loop");
+
+        loop {
+            // This adds the possibility to queue new "run later" tasks, inside a "run later" task. The
+            // newly added tasks will be executed before we block to receive an event.
+            loop {
+                let task = ctx.run_later_tasks.lock().unwrap().pop_front();
+                match task {
+                    Some(func_key) => {
+                        if let Ok(func) = lua.registry_value::<Function>(&func_key) {
+                            if let Err(e) = func.call::<_, Value>(()) {
+                                error!("error when calling run_later function: {:?}", e);
+                            }
                         }
+                        let _ = lua.remove_registry_value(func_key);
                     }
-                    Err(e) => {
-                        plugin_instance
-                            .error(format!("error when retreiving cleanup callback. {:?}", e));
+                    None => {
+                        break;
                     }
                 }
             }
+
+            let event_option = ctx.plugin_runtime.block_on({
+                async {
+                    tokio::select!(
+                        event_option = event_receiver.recv() => event_option,
+                        _ = shutdown_receiver.recv() => {
+                            None
+                        }
+                    )
+                }
+            });
+
+            // Handling the event must happen outside of the async runtime, so that non-async rust
+            // functions that are called from lua can call `block_on` on the runtime.
+            match event_option {
+                Some(event) => handle_event(&lua, &ctx, event),
+                None => break,
+            };
+        }
+
+        info!("event loop finished");
+        debug!("running plugin instance cleanup callbacks");
+
+        ctx.plugin_instances
+            .read()
+            .unwrap()
+            .iter()
+            .for_each(|plugin_instance| {
+                if let Some(ref callback_key) = plugin_instance.on_cleanup {
+                    match lua.registry_value::<Function>(callback_key) {
+                        Ok(callback) => {
+                            if let Err(e) = callback.call::<_, Value>(()) {
+                                plugin_instance
+                                    .error(format!("error when calling cleanup callback: {:?}", e));
+                            }
+                        }
+                        Err(e) => {
+                            plugin_instance
+                                .error(format!("error when retreiving cleanup callback. {:?}", e));
+                        }
+                    }
+                }
+            });
+
+        ctx.plugin_runtime.block_on(async {
+            // Drop sender at the latest possible time so Arc upgrades are possible
+            drop(plugin_shutdown_wait_sender);
+            debug!("Waiting for plugin system shutdown");
+            let _ = plugin_shutdown_wait_receiver.recv().await;
+            debug!("Plugin system shut down");
         });
 
-    ctx.runtime.block_on(async {
-        // Drop sender at the latest possible time so Arc upgrades are possible
-        drop(plugin_shutdown_wait_sender);
-        debug!("Waiting for plugin system shutdown");
-        let _ = plugin_shutdown_wait_receiver.recv().await;
-        debug!("Plugin system shut down");
-    });
+        drop(shutdown_wait_sender);
 
-    Ok(())
+        Ok(())
+    }
 }
 
 fn handle_event(lua: &Lua, ctx: &LuaContext, event: Event) {

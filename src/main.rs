@@ -12,7 +12,7 @@ mod plugin_system;
 mod server;
 mod window_manager;
 
-use plugin_system::{Event, Notification};
+use plugin_system::{Event, Notification, PluginSystem};
 use window_manager::WindowManager;
 
 async fn terminal_client(
@@ -74,7 +74,7 @@ async fn terminal_client(
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
 
-    let config = Arc::new(config::get_config()?);
+    let env_config = config::get_env_config()?;
 
     let (plugin_event_tx, plugin_event_rx) = mpsc::channel(64);
     let (plugin_notification_tx, _) = broadcast::channel(64);
@@ -94,25 +94,27 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
+    let plugin_system = match PluginSystem::init(
+        runtime.handle().clone(),
+        env_config,
+        shutdown_tx.clone(),
+        shutdown_wait_tx.clone(),
+        plugin_event_tx.clone(),
+        plugin_event_rx,
+        plugin_notification_tx.clone(),
+        wm,
+    ) {
+        Ok(plugin_system) => plugin_system,
+        Err(e) => {
+            eprintln!("Error when initializing the plugin system: {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    let config = Arc::new(plugin_system.get_config()?);
+
     runtime.block_on(async {
-        let mut plugin_system_handle = runtime.spawn_blocking({
-            let config = config.clone();
-            let event_tx = plugin_event_tx.clone();
-            let notification_tx = plugin_notification_tx.clone();
-            let shutdown_wait_tx = shutdown_wait_tx.clone();
-            let shutdown_tx = shutdown_tx.clone();
-            move || {
-                plugin_system::start(
-                    config,
-                    shutdown_tx,
-                    shutdown_wait_tx,
-                    event_tx,
-                    plugin_event_rx,
-                    notification_tx,
-                    wm,
-                )
-            }
-        });
+        let mut plugin_system_handle = runtime.spawn_blocking(|| plugin_system.event_loop());
 
         let mut server_handle = tokio::spawn(server::start(
             config,
