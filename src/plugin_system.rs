@@ -71,7 +71,7 @@ pub struct ModuleInfo {
     name: String,
     actions: Vec<String>,
     active_actions: HashSet<String>,
-    status: ModuleStatus,
+    status: Option<ModuleStatus>,
     message: Option<ModuleMessage>,
 }
 
@@ -107,7 +107,7 @@ pub enum Notification {
     ModuleStatusUpdate {
         #[serde(flatten)]
         module_identifier: ModuleIdentifier,
-        new_status: ModuleStatus,
+        new_status: Option<ModuleStatus>,
     },
     ModuleMessageUpdate {
         #[serde(flatten)]
@@ -153,7 +153,7 @@ struct Module {
     plugin_instance_name: String,
     actions: RwLock<Vec<Action>>,
     active_actions: RwLock<HashSet<String>>,
-    status: RwLock<ModuleStatus>,
+    status: RwLock<Option<ModuleStatus>>,
     message: RwLock<Option<ModuleMessage>>,
 }
 
@@ -164,7 +164,7 @@ impl Module {
             plugin_instance_name,
             actions: RwLock::new(Vec::new()),
             active_actions: RwLock::new(HashSet::new()),
-            status: RwLock::new("unknown".to_string()),
+            status: RwLock::new(None),
             message: RwLock::new(None),
         }
     }
@@ -237,7 +237,10 @@ fn list_statuses(ctx: &LuaContext) -> Vec<String> {
             let status = module.status.read().unwrap();
             let status_line = format!(
                 "{}{}{} -- {}",
-                plugin_instance.name, SEPARATOR, module.name, status
+                plugin_instance.name,
+                SEPARATOR,
+                module.name,
+                status.as_ref().unwrap_or(&"unknown".to_string())
             );
             status_lines.push(status_line)
         }
@@ -318,7 +321,7 @@ fn system_info(ctx: &LuaContext) -> SystemInfo {
                         .map(|action| action.name.clone())
                         .collect();
                     let active_actions = module.active_actions.read().unwrap().clone();
-                    let status = module.status.read().unwrap().to_string();
+                    let status = module.status.read().unwrap().clone();
                     let message = module.message.read().unwrap().clone();
 
                     ModuleInfo {

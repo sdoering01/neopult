@@ -478,9 +478,9 @@ impl ModuleHandle {
         Ok(())
     }
 
-    fn set_status(&self, status: ModuleStatus) -> mlua::Result<()> {
+    fn set_status(&self, status: Option<ModuleStatus>) -> mlua::Result<()> {
         self.module
-            .debug(format!("setting module status to '{}'", status));
+            .debug(format!("setting module status to '{:?}'", status));
         let mut module_status = self.module.status.write().unwrap();
         *module_status = status.clone();
 
@@ -498,9 +498,12 @@ impl ModuleHandle {
         Ok(())
     }
 
-    fn get_status(&self) -> mlua::Result<String> {
+    fn get_status<'lua>(&self, lua: &'lua Lua) -> mlua::Result<Value<'lua>> {
         let module_status = self.module.status.read().unwrap();
-        Ok(module_status.to_string())
+        match module_status.as_ref() {
+            Some(status) => Ok(Value::String(lua.create_string(status)?)),
+            None => Ok(Value::Nil),
+        }
     }
 
     fn set_message(&self, message: Option<ModuleMessage>) -> mlua::Result<()> {
@@ -570,7 +573,7 @@ impl UserData for ModuleHandle {
 
         methods.add_method("set_status", |_lua, this, status| this.set_status(status));
 
-        methods.add_method("get_status", |_lua, this, ()| this.get_status());
+        methods.add_method("get_status", |lua, this, ()| this.get_status(lua));
 
         methods.add_method("set_message", |_lua, this, message| {
             this.set_message(message)

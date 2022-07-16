@@ -60,7 +60,7 @@ async fn terminal_client(
                         let json = serde_json::to_string(&notification).expect("serialization");
                         match notification {
                             Notification::ModuleStatusUpdate { module_identifier, new_status } =>
-                                println!("new module status for {}: '{}'", module_identifier, new_status),
+                                println!("new module status for {}: '{:?}'", module_identifier, new_status),
                             Notification::ModuleMessageUpdate { module_identifier, new_message: Some(msg) } =>
                                 println!("new module message for {}: '{}'", module_identifier, msg),
                             Notification::ModuleMessageUpdate { module_identifier, new_message: None } =>
