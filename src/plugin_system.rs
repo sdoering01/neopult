@@ -8,7 +8,7 @@ use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     fmt::{self, Display, Formatter},
     io,
     sync::{Arc, Mutex, RwLock, Weak},
@@ -70,6 +70,7 @@ pub struct PluginInstanceInfo {
 pub struct ModuleInfo {
     name: String,
     actions: Vec<String>,
+    active_actions: HashSet<String>,
     status: ModuleStatus,
     message: Option<ModuleMessage>,
 }
@@ -113,6 +114,11 @@ pub enum Notification {
         module_identifier: ModuleIdentifier,
         new_message: Option<ModuleMessage>,
     },
+    ModuleActiveActionsUpdate {
+        #[serde(flatten)]
+        module_identifier: ModuleIdentifier,
+        new_active_actions: HashSet<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -146,6 +152,7 @@ struct Module {
     name: String,
     plugin_instance_name: String,
     actions: RwLock<Vec<Action>>,
+    active_actions: RwLock<HashSet<String>>,
     status: RwLock<ModuleStatus>,
     message: RwLock<Option<ModuleMessage>>,
 }
@@ -156,6 +163,7 @@ impl Module {
             name,
             plugin_instance_name,
             actions: RwLock::new(Vec::new()),
+            active_actions: RwLock::new(HashSet::new()),
             status: RwLock::new("unknown".to_string()),
             message: RwLock::new(None),
         }
@@ -309,12 +317,14 @@ fn system_info(ctx: &LuaContext) -> SystemInfo {
                         .iter()
                         .map(|action| action.name.clone())
                         .collect();
+                    let active_actions = module.active_actions.read().unwrap().clone();
                     let status = module.status.read().unwrap().to_string();
                     let message = module.message.read().unwrap().clone();
 
                     ModuleInfo {
                         name,
                         actions,
+                        active_actions,
                         status,
                         message,
                     }

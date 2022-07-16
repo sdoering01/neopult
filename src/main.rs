@@ -65,6 +65,8 @@ async fn terminal_client(
                                 println!("new module message for {}: '{}'", module_identifier, msg),
                             Notification::ModuleMessageUpdate { module_identifier, new_message: None } =>
                                 println!("cleared message for module {}", module_identifier),
+                            Notification::ModuleActiveActionsUpdate { module_identifier, new_active_actions } =>
+                                println!("new active actions for {}: '{:?}'", module_identifier, new_active_actions),
                         }
                         println!("  json: {}", json);
                     }

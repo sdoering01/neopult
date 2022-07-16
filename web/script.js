@@ -49,8 +49,9 @@
     const pluginContainerEl = document.getElementById('plugin-container');
     const statusEl = document.getElementById('status');
     const reconnectButtonEl = document.getElementById('reconnect-button');
-    const moduleStatusElements = {};
-    const moduleMessageElements = {};
+    const moduleStatusElements = new Map();
+    const moduleMessageElements = new Map();
+    const actionButtonElements = new Map();
 
     const heartbeat = () => {
         clearTimeout(heartbeatTimeout);
@@ -165,29 +166,35 @@
                     const moduleStatusEl = document.createElement('span');
                     moduleStatusEl.innerText = module.status;
                     moduleStatusEl.classList.add('module-info__status');
-                    moduleStatusElements[moduleIdentifier] = moduleStatusEl;
+                    moduleStatusElements.set(moduleIdentifier, moduleStatusEl);
                     moduleInfoEl.appendChild(moduleStatusEl);
 
                     const moduleActionsEl = document.createElement('div');
                     moduleActionsEl.classList.add('module-actions');
                     moduleContainerEl.appendChild(moduleActionsEl);
+
+                    const moduleActionButtonElements = new Map();
                     for (const action of module.actions) {
                         const actionButtonEl = document.createElement('button');
                         actionButtonEl.classList.add('action-button');
                         actionButtonEl.innerText = action;
                         actionButtonEl.onclick = () => {
-                            console.log(`call ${moduleIdentifier}::${action}`);
+                            console.log(`call action ${moduleIdentifier}::${action}`);
                             callAction(pluginInstance.name, module.name, action);
                         };
+                        moduleActionButtonElements.set(action, actionButtonEl);
                         moduleActionsEl.appendChild(actionButtonEl);
                     }
+                    actionButtonElements.set(moduleIdentifier, moduleActionButtonElements);
+
+                    handleModuleActiveActionsUpdate(moduleIdentifier, module.active_actions);
 
                     const moduleMessageEl = document.createElement('div');
                     moduleMessageEl.classList.add('module-message');
                     if (module.message) {
                         moduleMessageEl.innerHTML = module.message;
                     }
-                    moduleMessageElements[moduleIdentifier] = moduleMessageEl;
+                    moduleMessageElements.set(moduleIdentifier, moduleMessageEl);
                     moduleContainerEl.appendChild(moduleMessageEl);
                 }
             }
@@ -198,11 +205,15 @@
             if (notification.module_status_update) {
                 const update = notification.module_status_update;
                 const identifier = `${update.plugin_instance}::${update.module}`;
-                moduleStatusElements[identifier].innerText = update.new_status;
+                moduleStatusElements.get(identifier).innerText = update.new_status;
             } else if (notification.module_message_update) {
                 const update = notification.module_message_update;
                 const identifier = `${update.plugin_instance}::${update.module}`;
-                moduleMessageElements[identifier].innerHTML = update.new_message;
+                moduleMessageElements.get(identifier).innerHTML = update.new_message;
+            } else if (notification.module_active_actions_update) {
+                const update = notification.module_active_actions_update;
+                const moduleIdentifier = `${update.plugin_instance}::${update.module}`;
+                handleModuleActiveActionsUpdate(moduleIdentifier, update.new_active_actions);
             }
         }
     };
@@ -215,6 +226,19 @@
         console.log('socket close', event);
         handleDisconnect(event.reason);
     };
+
+    const handleModuleActiveActionsUpdate = (moduleIdentifier, new_active_actions) => {
+        let moduleActionButtonElements = actionButtonElements.get(moduleIdentifier);
+        for (const actionButtonEl of moduleActionButtonElements.values()) {
+            actionButtonEl.classList.remove('action-button--active');
+        }
+        for (const action of new_active_actions) {
+            const actionButtonEl = moduleActionButtonElements.get(action);
+            if (actionButtonEl) {
+                actionButtonEl.classList.add('action-button--active');
+            }
+        }
+    }
 
     const disconnect = (reconnectOverwrite = null) => {
         socket.close();

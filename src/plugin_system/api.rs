@@ -522,6 +522,27 @@ impl ModuleHandle {
 
         Ok(())
     }
+
+    fn set_active_actions(&self, actions: Vec<String>) -> mlua::Result<()> {
+        self.module
+            .debug(format!("setting active actions to '{:?}'", actions));
+        let mut active_actions = self.module.active_actions.write().unwrap();
+        active_actions.clear();
+        active_actions.extend(actions);
+
+        let _ = self
+            .ctx
+            .notification_sender
+            .send(Notification::ModuleActiveActionsUpdate {
+                module_identifier: ModuleIdentifier {
+                    plugin_instance: self.module.plugin_instance_name.clone(),
+                    module: self.module.name.clone(),
+                },
+                new_active_actions: active_actions.clone(),
+            });
+
+        Ok(())
+    }
 }
 
 impl UserData for ModuleHandle {
@@ -553,6 +574,10 @@ impl UserData for ModuleHandle {
 
         methods.add_method("set_message", |_lua, this, message| {
             this.set_message(message)
+        });
+
+        methods.add_method("set_active_actions", |_lua, this, actions| {
+            this.set_active_actions(actions)
         });
     }
 }
