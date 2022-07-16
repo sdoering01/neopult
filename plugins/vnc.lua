@@ -7,6 +7,9 @@ local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
+local ACTION_MAX = "max"
+local ACTION_HIDE = "hide"
+
 local VIEWER_BINARY = "ssvncviewer"
 
 -- TODO: Define those in camera_mode plugin and require them here
@@ -28,6 +31,7 @@ local function setup(args)
         if P.module_handle and P.module_handle:get_status() == STATUS_ACTIVE then
             P.window_handle:max(P.resolution, { margin = { bottom = P.bottom_margin_should }})
             P.bottom_margin_is = P.bottom_margin_should
+            P.module_handle:set_active_actions({ ACTION_MAX })
         end
     end
 
@@ -56,6 +60,7 @@ local function setup(args)
                 P.window_handle:unclaim()
                 P.window_handle = nil
                 P.module_handle:set_status(STATUS_WAITING)
+                P.module_handle:set_active_actions({})
             end
         end
     end
@@ -142,8 +147,9 @@ local function setup(args)
                 end
                 P.module_handle:set_status(STATUS_INACTIVE)
                 P.module_handle:set_message(nil)
+                P.module_handle:set_active_actions({})
             end)
-            P.module_handle:register_action("max", function()
+            P.module_handle:register_action(ACTION_MAX, function()
                 P.module_handle:info("max action called")
                 P.max_window()
             end)
@@ -151,6 +157,7 @@ local function setup(args)
                 P.module_handle:info("hide action called")
                 if P.module_handle:get_status() == STATUS_ACTIVE then
                     P.window_handle:hide()
+                    P.module_handle:set_active_actions({ ACTION_HIDE })
                 end
             end)
         end

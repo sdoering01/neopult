@@ -20,12 +20,12 @@ local function setup(args)
         local module_handle = plugin_instance_handle:register_module("camera-mode")
         if module_handle then
             store:set(state)
-            module_handle:set_status(state.mode)
+            module_handle:set_active_actions({ state.mode })
             for _, mode in ipairs(MODES) do
                 module_handle:register_action(mode, function()
                     state.mode = mode
                     store:set(state)
-                    module_handle:set_status(state.mode)
+                    module_handle:set_active_actions({ mode })
                 end)
             end
         end

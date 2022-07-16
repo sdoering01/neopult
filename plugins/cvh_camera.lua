@@ -6,6 +6,10 @@ local STATUS_WAITING = "waiting"
 local STATUS_ACTIVE = "active"
 local STATUS_INACTIVE = "inactive"
 
+local ACTION_MIN = "min"
+local ACTION_MAX = "max"
+local ACTION_HIDE = "hide"
+
 -- TODO: Define those in camera_mode plugin and require them here
 local CAMERAS_INSIDE = "cameras-inside"
 local CAMERAS_OUTSIDE = "cameras-outside"
@@ -84,6 +88,12 @@ local function setup(args)
                     )
                     P.camera_server_handle:writeln(cmd)
                     P.update_camera_visible_state(slot + 1, true)
+                    -- NOTE: Adjust this, when window manager uses more complicated z values.
+                    if z == 0 then
+                        P.camera_modules[slot + 1]:set_active_actions({ ACTION_MAX })
+                    else
+                        P.camera_modules[slot + 1]:set_active_actions({ ACTION_MIN })
+                    end
                 end,
                 map = function()
                     P.camera_server_handle:writeln("show " .. slot)
@@ -92,6 +102,7 @@ local function setup(args)
                 unmap = function()
                     P.camera_server_handle:writeln("hide " .. slot)
                     P.update_camera_visible_state(slot + 1, false)
+                    P.camera_modules[slot + 1]:set_active_actions({ ACTION_HIDE })
                 end,
                 primary_demotion_action = "make_min",
                 min_geometry = function()
@@ -99,6 +110,7 @@ local function setup(args)
                 end,
             })
             P.plugin_handle:info("new feed on slot " .. slot)
+            P.camera_modules[slot + 1]:set_active_actions({ ACTION_MIN })
             P.camera_modules[slot + 1]:set_status(STATUS_ACTIVE)
         elseif type == "remove_feed" then
             local slot_str = string.sub(line, space + 1)
@@ -108,6 +120,7 @@ local function setup(args)
             P.camera_handles[slot + 1] = nil
             P.update_camera_visible_state(slot + 1, false)
             P.plugin_handle:info("removed feed on slot " .. slot)
+            P.camera_modules[slot + 1]:set_active_actions({})
             -- Only set status to waiting when status was active previously. This
             -- prevents overwriting an inactive status.
             if P.camera_modules[slot + 1]:get_status() == STATUS_ACTIVE then
@@ -253,19 +266,19 @@ local function setup(args)
                     module_handle:set_message(nil)
                     P.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
                 end)
-                module_handle:register_action("hide", function()
+                module_handle:register_action(ACTION_HIDE, function()
                     module_handle:info("hide action")
                     if P.camera_handles[camera] then
                         P.camera_handles[camera]:hide()
                     end
                 end)
-                module_handle:register_action("max", function()
+                module_handle:register_action(ACTION_MAX, function()
                     module_handle:info("max action")
                     if P.camera_handles[camera] then
                         P.camera_handles[camera]:max({ 1200, 900 })
                     end
                 end)
-                module_handle:register_action("min", function()
+                module_handle:register_action(ACTION_MIN, function()
                     module_handle:info("min action")
                     if P.camera_handles[camera] then
                         P.camera_handles[camera]:min()
