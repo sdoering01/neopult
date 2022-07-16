@@ -303,13 +303,18 @@
 
     const reconnect = () => {
         // For manual reconnecting
-        clearTimeout(reconnectTimeout);
-        clearInterval(reconnectUpdateInterval);
+        cancelReconnect();
         window.removeEventListener('focus', reconnect);
         reconnecting = true;
-        reconnectButtonEl.classList.add('hidden');
         connect();
     };
+
+    const cancelReconnect = () => {
+        clearTimeout(reconnectTimeout);
+        clearInterval(reconnectUpdateInterval);
+        reconnecting = false;
+        reconnectButtonEl.classList.add('hidden');
+    }
 
     const updateReconnectButton = (millis) => {
         let label = initialConnect ? RECONNECT_LABEL_INITIAL : RECONNECT_LABEL;
@@ -362,6 +367,7 @@
         password = '';
         hasStoredPassword = false;
         initialConnect = true;
+        cancelReconnect();
     };
 
     reconnectButtonEl.addEventListener('click', reconnect);
