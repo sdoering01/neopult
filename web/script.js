@@ -86,8 +86,9 @@
         console.log('connect');
         socket = new WebSocket(socketAddress);
 
-        passwordSendButtonEl.disabled = true;
+        passwordInputEl.disabled = true;
         passwordRememberCheckboxEl.disabled = true;
+        passwordSendButtonEl.disabled = true;
 
         if (initialConnect) {
             statusEl.innerText = 'Connecting';
@@ -104,7 +105,6 @@
     const handleSocketOpen = (event) => {
         console.log('socket open', event);
         reconnecting = false;
-        initialConnect = false;
         clearTimeout(reconnectTimeout);
         clearInterval(reconnectUpdateInterval);
         reconnectButtonEl.classList.add('hidden');
@@ -134,6 +134,7 @@
             heartbeat();
         } else if (msg.system_info) {
             statusEl.innerText = 'Connected';
+            initialConnect = false;
 
             if (rememberPassword) {
                 localStorage.setItem(LOCAL_STORAGE_PASSWORD_KEY, password);
@@ -254,8 +255,9 @@
             reason === SOCKET_DISCONNECT_REASON_AUTH ||
             reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT
         ) {
-            passwordSendButtonEl.disabled = false;
+            passwordInputEl.disabled = false;
             passwordRememberCheckboxEl.disabled = false;
+            passwordSendButtonEl.disabled = false;
             appContainerEl.classList.add('hidden');
             authContainerEl.classList.remove('hidden');
         }
@@ -335,6 +337,7 @@
         localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
         password = '';
         hasStoredPassword = false;
+        initialConnect = true;
     };
 
     reconnectButtonEl.addEventListener('click', reconnect);
