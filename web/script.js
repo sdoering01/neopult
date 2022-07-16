@@ -1,6 +1,8 @@
 (() => {
     'use strict';
 
+    const LOCAL_STORAGE_PASSWORD_KEY = 'neopult_password';
+
     // NOTE: Make sure to adjust the timeout when changing the ping interval on the server
     const CONNECTION_TIMEOUT_MS = 10000;
     const RECONNECT_INTERVALS_MS = [1000, 3000, 10000];
@@ -18,6 +20,8 @@
     let reconnectTimeout;
     let reconnectUpdateInterval;
     let password;
+    let rememberPassword = false;
+    let hasStoredPassword = false;
 
     const socketProtocol = window.location.protocol === 'http:' ? 'ws:' : 'wss:';
     let socketPath = window.location.pathname;
@@ -38,8 +42,10 @@
     const authContainerEl = document.getElementById('auth-container');
     const passwordFormEl = document.getElementById('password-form');
     const passwordInputEl = document.getElementById('password-input');
+    const passwordRememberCheckboxEl = document.getElementById('password-remember-checkbox');
     const passwordSendButtonEl = document.getElementById('password-send-button');
     const appContainerEl = document.getElementById('app-container');
+    const logoutButtonEl = document.getElementById('logout-button');
     const pluginContainerEl = document.getElementById('plugin-container');
     const statusEl = document.getElementById('status');
     const reconnectButtonEl = document.getElementById('reconnect-button');
@@ -80,6 +86,9 @@
         console.log('connect');
         socket = new WebSocket(socketAddress);
 
+        passwordSendButtonEl.disabled = true;
+        passwordRememberCheckboxEl.disabled = true;
+
         if (initialConnect) {
             statusEl.innerText = 'Connecting';
         } else {
@@ -99,7 +108,11 @@
         clearTimeout(reconnectTimeout);
         clearInterval(reconnectUpdateInterval);
         reconnectButtonEl.classList.add('hidden');
-        statusEl.innerText = 'Authenticating';
+        if (hasStoredPassword) {
+            statusEl.innerText = 'Authenticating with stored password';
+        } else {
+            statusEl.innerText = 'Authenticating';
+        }
         socket.send('Password ' + password);
     };
 
@@ -121,6 +134,10 @@
             heartbeat();
         } else if (msg.system_info) {
             statusEl.innerText = 'Connected';
+
+            if (rememberPassword) {
+                localStorage.setItem(LOCAL_STORAGE_PASSWORD_KEY, password);
+            }
 
             appContainerEl.classList.remove('hidden');
             authContainerEl.classList.add('hidden');
@@ -198,12 +215,12 @@
         handleDisconnect(event.reason);
     };
 
-    const disconnect = () => {
+    const disconnect = (reconnectOverwrite = null) => {
         socket.close();
-        handleDisconnect('');
+        handleDisconnect('', reconnectOverwrite);
     };
 
-    const handleDisconnect = (reason) => {
+    const handleDisconnect = (reason, reconnectOverwrite = null) => {
         socket.removeEventListener('open', handleSocketOpen);
         socket.removeEventListener('error', handleSocketError);
         socket.removeEventListener('close', handleSocketClose);
@@ -214,7 +231,13 @@
 
         let statusText;
         if (reason === SOCKET_DISCONNECT_REASON_AUTH) {
-            statusText = 'Password incorrect';
+            if (hasStoredPassword) {
+                localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
+                statusText = 'Stored password incorrect';
+                hasStoredPassword = false;
+            } else {
+                statusText = 'Password incorrect';
+            }
         } else if (reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
             statusText = 'Socket authentication timed out';
         } else {
@@ -226,13 +249,22 @@
         }
         statusEl.innerText = statusText;
 
-        if (reason === SOCKET_DISCONNECT_REASON_AUTH || reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
+        if (
+            reconnectOverwrite === false ||
+            reason === SOCKET_DISCONNECT_REASON_AUTH ||
+            reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT
+        ) {
             passwordSendButtonEl.disabled = false;
+            passwordRememberCheckboxEl.disabled = false;
             appContainerEl.classList.add('hidden');
             authContainerEl.classList.remove('hidden');
         }
 
-        const shouldReconnect = reason !== SOCKET_DISCONNECT_REASON_AUTH && reason !== SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT;
+        const shouldReconnect =
+            reconnectOverwrite != null
+                ? reconnectOverwrite
+                : reason !== SOCKET_DISCONNECT_REASON_AUTH &&
+                  reason !== SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT;
         if (shouldReconnect) {
             if (reconnecting) {
                 reconnecting = false;
@@ -283,12 +315,30 @@
 
     const handlePasswordSubmit = (event) => {
         event.preventDefault();
-        passwordSendButtonEl.disabled = true;
         password = passwordInputEl.value;
+        rememberPassword = passwordRememberCheckboxEl.checked;
         passwordInputEl.value = '';
         connect();
-    }
+    };
+
+    const tryAutoConnect = () => {
+        const storedPassword = localStorage.getItem(LOCAL_STORAGE_PASSWORD_KEY);
+        if (storedPassword !== null) {
+            hasStoredPassword = true;
+            password = storedPassword;
+            connect();
+        }
+    };
+
+    const logout = () => {
+        disconnect(false);
+        localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
+        password = '';
+    };
 
     reconnectButtonEl.addEventListener('click', reconnect);
     passwordFormEl.addEventListener('submit', handlePasswordSubmit);
+    logoutButtonEl.addEventListener('click', logout);
+
+    tryAutoConnect();
 })();
