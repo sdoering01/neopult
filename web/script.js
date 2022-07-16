@@ -334,6 +334,7 @@
         disconnect(false);
         localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
         password = '';
+        hasStoredPassword = false;
     };
 
     reconnectButtonEl.addEventListener('click', reconnect);
