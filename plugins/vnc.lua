@@ -81,12 +81,38 @@ local function setup(args)
         end
     end
 
+    P.validate_yesvnc_options = function(yesvnc_options)
+        if not yesvnc_options.interface_base_url then
+            log.error("vnc plugin setup called without mandatory yesvnc parameter `interface_base_url`")
+            return false
+        end
+        if yesvnc_options.secure_websockify_connection == false then
+            log.warn("vnc plugin setup called with yesvnc parameter `secure_websockify_connection` set to `false`, this parameter should be set to `true` in production")
+        end
+        if not yesvnc_options.websockify_port then
+            log.error("vnc plugin setup called without mandatory yesvnc parameter `websockify_port`")
+            return false
+        end
+        if not yesvnc_options.websockify_host then
+            log.error("vnc plugin setup called without mandatory yesvnc parameter `websockify_host`")
+            return false
+        end
+        if not yesvnc_options.websockify_path then
+            log.error("vnc plugin setup called without mandatory yesvnc parameter `websockify_path`")
+            return false
+        end
+        return true
+    end
+
+
+    local channel = api.get_channel()
 
     args = args or {}
 
     local listen = args.listen
     local listen_base_url = args.listen_base_url
     local camera_mode_store = args.camera_mode_store
+    local yesvnc = args.yesvnc
 
     if listen == nil then
         error("vnc plugin setup called without mandatory `listen` parameter")
@@ -99,6 +125,15 @@ local function setup(args)
     if camera_mode_store then
         P.handle_camera_mode_update(camera_mode_store:get())
         camera_mode_store:subscribe(P.handle_camera_mode_update)
+    end
+
+    if yesvnc then
+        yesvnc.secure_websockify_connection = yesvnc.secure_websockify_connection ~= false
+        if P.validate_yesvnc_options(yesvnc) then
+            P.yesvnc = yesvnc
+        else
+            yesvnc = nil
+        end
     end
 
     log.debug("vnc module setup")
@@ -114,15 +149,32 @@ local function setup(args)
             P.module_handle:register_action("start", function()
                 P.module_handle:info("start action called")
                 if P.module_handle:get_status() == STATUS_INACTIVE then
-                    P.process_handle = P.plugin_handle:spawn_process(VIEWER_BINARY, {
+                    local vnc_port = 5500 + listen
+
+                    P.viewer_process_handle = P.plugin_handle:spawn_process(VIEWER_BINARY, {
                         args = { "-viewonly", "-listen", tostring(listen) },
                         on_output = P.handle_line,
                     })
+                    if P.yesvnc then
+                        P.websockify_process_handle = P.plugin_handle:spawn_process("websockify", {
+                            args = { tostring(yesvnc.websockify_port), "127.0.0.1:" .. tostring(vnc_port) }
+                        });
+                    end
                     P.module_handle:set_status(STATUS_WAITING)
 
-                    local port = 5500 + listen
-                    local address = listen_base_url .. ":" .. port
+                    local address = listen_base_url .. ":" .. vnc_port
                     local message = "with a vnc client connect to " .. address
+                    if P.yesvnc then
+                        local yesvnc_link = string.format(
+                            "%s?host=%s&path=%s&channel=%d&secure=%s",
+                            yesvnc.interface_base_url,
+                            yesvnc.websockify_host,
+                            yesvnc.websockify_path,
+                            channel,
+                            tostring(yesvnc.secure_websockify_connection)
+                        )
+                        message = string.format([[%s or use the <a href="%s" target="_blank"> yesVNC web connector</a>]], message, yesvnc_link)
+                    end
                     P.module_handle:info(message)
                     P.module_handle:set_message(message)
                 end
@@ -142,8 +194,12 @@ local function setup(args)
                     os.execute(kill_cmd)
                 end
                 if cur_status ~= STATUS_INACTIVE then
-                    P.process_handle:kill()
-                    P.process_handle = nil
+                    P.viewer_process_handle:kill()
+                    P.viewer_process_handle = nil
+                    if P.websockify_process_handle then
+                        P.websockify_process_handle:kill()
+                        P.websockify_process_handle = nil
+                    end
                 end
                 P.module_handle:set_status(STATUS_INACTIVE)
                 P.module_handle:set_message(nil)

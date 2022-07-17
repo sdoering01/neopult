@@ -41,6 +41,9 @@ else
     tmux new-window -t 6 -n novnc
     tmux send -t 6 './scripts/novnc-start.sh 5'
 
+    tmux new-window -t 7 -c ../yesvnc/public -n yesvnc
+    tmux send -t 7 'python -m http.server 3001'
+
     if $neopult_setup; then
         tmux select-window -t 1
     else

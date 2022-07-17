@@ -23,10 +23,22 @@ require("cvh_camera").setup({
 -- NOTE: Remember to allow tcp traffic on port 5500 + `listen` in your firewall
 -- Change this to match the URL/IP to which VNC clients can connect. `:<port>` will be appended to generate the connection url.
 local listen_base_url = "your-domain.com"
+local websockify_port_1 = 6900 + channel -- 6900 = 6800 + 100 (100 channels with one websockify instance each)
 require("vnc").setup({
     listen = 2 * channel,
     listen_base_url = listen_base_url,
     camera_mode_store = camera_mode_store,
+    -- Adds support for the yesvnc web connector.
+    yesvnc = {
+        -- Change this to match the URL where the yesvnc web connector is served
+        interface_base_url = "https://your_domain.com/yesvnc/index.html",
+        secure_websockify_connection = true,
+        websockify_port = websockify_port_1,
+        -- Change this to the host where the websockify instance is running
+        websockify_host = "your_domain.com:" .. websockify_port_1,
+        -- Change this to the path where the websockify instance is running
+        websockify_path = "/",
+    },
 })
 require("vnc").setup({
     listen = 2 * channel + 1,
