@@ -80,7 +80,7 @@ channel_setup() {
     mkdir -p "$CHANNEL_DEFAULTS_DIR/plugins"
 
     echo "Copying channel defaults"
-    cp -ra "$WORKING_DIR/plugins/." "$CHANNEL_DEFAULTS_DIR"
+    cp -ra "$WORKING_DIR/plugins/." "$CHANNEL_DEFAULTS_DIR/plugins"
     # Do not overwrite existing init script
     cp -n "$WORKING_DIR/init-example.lua" "$CHANNEL_DEFAULTS_DIR/init.lua"
     cp "$WORKING_DIR/assets/vnc/channel-banner.pdf" "$WORKING_DIR/assets/vnc/vncstartup" "$CHANNEL_DEFAULTS_DIR"
