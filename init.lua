@@ -15,7 +15,7 @@ require("cvh_camera").setup({
 })
 
 local listen_base_url = "127.0.0.1"
-local websockify_port_1 = 6900 + channel -- 6900 = 6800 + 100 (100 channels with one websockify instance each)
+local websockify_port_1 = 6180 + channel -- 6180 = 6080 + 100 (100 channels with one websockify instance each)
 require("vnc").setup({
     listen = 2 * channel,
     listen_base_url = listen_base_url,
