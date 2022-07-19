@@ -29,7 +29,7 @@ local function setup(args)
 
     P.max_window = function()
         if P.module_handle and P.module_handle:get_status() == STATUS_ACTIVE then
-            P.window_handle:max(P.resolution, { margin = { bottom = P.bottom_margin_should }})
+            P.window_handle:max(P.resolution, { margin = { bottom = P.bottom_margin_should } })
             P.bottom_margin_is = P.bottom_margin_should
             P.module_handle:set_active_actions({ ACTION_MAX })
         end
@@ -141,7 +141,7 @@ local function setup(args)
     if P.plugin_handle then
         P.plugin_handle:debug("sucessfully created plugin handle")
 
-        P.module_handle = P.plugin_handle:register_module("vnc-" .. listen)
+        P.module_handle = P.plugin_handle:register_module("vnc-" .. listen, { display_name = "VNC " .. listen })
 
         if P.module_handle then
             P.module_handle:set_status(STATUS_INACTIVE)
@@ -157,7 +157,7 @@ local function setup(args)
                     })
                     if P.yesvnc then
                         P.websockify_process_handle = P.plugin_handle:spawn_process("websockify", {
-                            args = { tostring(yesvnc.websockify_port), "127.0.0.1:" .. tostring(vnc_port) }
+                            args = { tostring(P.yesvnc.websockify_port), "127.0.0.1:" .. tostring(vnc_port) }
                         });
                     end
                     P.module_handle:set_status(STATUS_WAITING)
@@ -167,18 +167,19 @@ local function setup(args)
                     if P.yesvnc then
                         local yesvnc_link = string.format(
                             "%s?host=%s&path=%s&channel=%d&secure=%s",
-                            yesvnc.interface_base_url,
-                            yesvnc.websockify_host,
-                            yesvnc.websockify_path,
+                            P.yesvnc.interface_base_url,
+                            P.yesvnc.websockify_host,
+                            P.yesvnc.websockify_path,
                             channel,
-                            tostring(yesvnc.secure_websockify_connection)
+                            tostring(P.yesvnc.secure_websockify_connection)
                         )
-                        message = string.format([[%s or use the <a href="%s" target="_blank"> yesVNC web connector</a>]], message, yesvnc_link)
+                        message = string.format([[%s or use the <a href="%s" target="_blank"> yesVNC web connector</a>]]
+                            , message, yesvnc_link)
                     end
                     P.module_handle:info(message)
                     P.module_handle:set_message(message)
                 end
-            end)
+            end, { display_name = "Start" })
             P.module_handle:register_action("stop", function()
                 P.module_handle:info("stop action called")
                 local cur_status = P.module_handle:get_status()
@@ -204,18 +205,18 @@ local function setup(args)
                 P.module_handle:set_status(STATUS_INACTIVE)
                 P.module_handle:set_message(nil)
                 P.module_handle:set_active_actions({})
-            end)
+            end, { display_name = "Stop" })
             P.module_handle:register_action(ACTION_MAX, function()
                 P.module_handle:info("max action called")
                 P.max_window()
-            end)
+            end, { display_name = "Max" })
             P.module_handle:register_action("hide", function()
                 P.module_handle:info("hide action called")
                 if P.module_handle:get_status() == STATUS_ACTIVE then
                     P.window_handle:hide()
                     P.module_handle:set_active_actions({ ACTION_HIDE })
                 end
-            end)
+            end, { display_name = "Hide" })
         end
     end
 end

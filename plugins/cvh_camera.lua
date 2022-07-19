@@ -176,7 +176,8 @@ local function setup(args)
     P.sender_base_url = args.sender_base_url
 
     if ping_janus ~= false then
-        local janus_online_cmd = string.format([[curl --location --silent --fail --request POST --data '{"janus":"ping","transaction":"foobar"}' %s >/dev/null]], janus_url)
+        local janus_online_cmd = string.format([[curl --location --silent --fail --request POST --data '{"janus":"ping","transaction":"foobar"}' %s >/dev/null]]
+            , janus_url)
         if os.execute(janus_online_cmd) ~= 0 then
             error("janus can't be reached under the provided `janus_url`, try starting it on this system (e.g. `systemctl start janus`), make sure that janus.transport.http.jcfg is configured correctly")
         end
@@ -235,7 +236,10 @@ local function setup(args)
             -- local camera = camera
             P.slot_active_states[camera] = false
             P.camera_visible_states[camera] = false
-            local module_handle = P.plugin_handle:register_module("camera-" .. camera)
+            local module_handle = P.plugin_handle:register_module(
+                "camera-" .. camera,
+                { display_name = "Camera " .. camera }
+            )
             if module_handle then
                 P.camera_modules[camera] = module_handle
                 module_handle:set_status(STATUS_INACTIVE)
@@ -259,31 +263,31 @@ local function setup(args)
                     local sender_message = P.generate_sender_message(sender_link)
                     module_handle:info(sender_message)
                     module_handle:set_message(sender_message)
-                end)
+                end, { display_name = "Start" })
                 module_handle:register_action("stop", function()
                     module_handle:info("stop action")
                     module_handle:set_status(STATUS_INACTIVE)
                     module_handle:set_message(nil)
                     P.camera_server_handle:writeln("deactivate_slot " .. (camera - 1))
-                end)
+                end, { display_name = "Stop" })
                 module_handle:register_action(ACTION_HIDE, function()
                     module_handle:info("hide action")
                     if P.camera_handles[camera] then
                         P.camera_handles[camera]:hide()
                     end
-                end)
+                end, { display_name = "Hide" })
                 module_handle:register_action(ACTION_MAX, function()
                     module_handle:info("max action")
                     if P.camera_handles[camera] then
                         P.camera_handles[camera]:max({ 1200, 900 })
                     end
-                end)
+                end, { display_name = "Max" })
                 module_handle:register_action(ACTION_MIN, function()
                     module_handle:info("min action")
                     if P.camera_handles[camera] then
                         P.camera_handles[camera]:min()
                     end
-                end)
+                end, { display_name = "Min" })
             end
         end
     end
