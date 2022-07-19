@@ -69,10 +69,17 @@ pub struct PluginInstanceInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleInfo {
     name: String,
-    actions: Vec<String>,
+    display_name: Option<String>,
+    actions: Vec<ActionInfo>,
     active_actions: HashSet<String>,
     status: Option<ModuleStatus>,
     message: Option<ModuleMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ActionInfo {
+    name: String,
+    display_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -150,6 +157,7 @@ type ModuleMessage = String;
 #[derive(Debug)]
 struct Module {
     name: String,
+    display_name: Option<String>,
     plugin_instance_name: String,
     actions: RwLock<Vec<Action>>,
     active_actions: RwLock<HashSet<String>>,
@@ -158,9 +166,14 @@ struct Module {
 }
 
 impl Module {
-    fn new(name: String, plugin_instance_name: String) -> Self {
+    fn new(
+        name: String,
+        plugin_instance_name: String,
+        display_name: Option<String>,
+    ) -> Self {
         Self {
             name,
+            display_name,
             plugin_instance_name,
             actions: RwLock::new(Vec::new()),
             active_actions: RwLock::new(HashSet::new()),
@@ -182,6 +195,7 @@ impl LogWithPrefix for Module {
 #[derive(Debug)]
 struct Action {
     name: String,
+    display_name: Option<String>,
     key: RegistryKey,
 }
 
@@ -313,12 +327,16 @@ fn system_info(ctx: &LuaContext) -> SystemInfo {
                 .iter()
                 .map(|module| {
                     let name = module.name.clone();
+                    let display_name = module.display_name.clone();
                     let actions = module
                         .actions
                         .read()
                         .unwrap()
                         .iter()
-                        .map(|action| action.name.clone())
+                        .map(|action| ActionInfo {
+                            name: action.name.clone(),
+                            display_name: action.display_name.clone(),
+                        })
                         .collect();
                     let active_actions = module.active_actions.read().unwrap().clone();
                     let status = module.status.read().unwrap().clone();
@@ -326,6 +344,7 @@ fn system_info(ctx: &LuaContext) -> SystemInfo {
 
                     ModuleInfo {
                         name,
+                        display_name,
                         actions,
                         active_actions,
                         status,

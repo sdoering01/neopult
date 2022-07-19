@@ -159,7 +159,7 @@
                     moduleContainerEl.appendChild(moduleInfoEl);
 
                     const moduleNameEl = document.createElement('span');
-                    moduleNameEl.innerText = module.name;
+                    moduleNameEl.innerText = module.display_name || module.name;
                     moduleNameEl.classList.add('module-info__name');
                     moduleInfoEl.appendChild(moduleNameEl);
 
@@ -174,15 +174,15 @@
                     moduleContainerEl.appendChild(moduleActionsEl);
 
                     const moduleActionButtonElements = new Map();
-                    for (const action of module.actions) {
+                    for (const { name, display_name } of module.actions) {
                         const actionButtonEl = document.createElement('button');
                         actionButtonEl.classList.add('action-button');
-                        actionButtonEl.innerText = action;
+                        actionButtonEl.innerText = display_name || name;
                         actionButtonEl.onclick = () => {
-                            console.log(`call action ${moduleIdentifier}::${action}`);
-                            callAction(pluginInstance.name, module.name, action);
+                            console.log(`call action ${moduleIdentifier}::${name}`);
+                            callAction(pluginInstance.name, module.name, name);
                         };
-                        moduleActionButtonElements.set(action, actionButtonEl);
+                        moduleActionButtonElements.set(name, actionButtonEl);
                         moduleActionsEl.appendChild(actionButtonEl);
                     }
                     actionButtonElements.set(moduleIdentifier, moduleActionButtonElements);
@@ -238,7 +238,7 @@
                 actionButtonEl.classList.add('action-button--active');
             }
         }
-    }
+    };
 
     const disconnect = (reconnectOverwrite = null) => {
         socket.close();
@@ -314,7 +314,7 @@
         clearInterval(reconnectUpdateInterval);
         reconnecting = false;
         reconnectButtonEl.classList.add('hidden');
-    }
+    };
 
     const updateReconnectButton = (millis) => {
         let label = initialConnect ? RECONNECT_LABEL_INITIAL : RECONNECT_LABEL;

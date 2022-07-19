@@ -33,7 +33,7 @@ impl PluginInstanceHandle {
     fn register_module<'lua>(
         &self,
         lua: &'lua Lua,
-        (name, _args): (String, Value),
+        (name, opts): (String, Value),
     ) -> mlua::Result<Value<'lua>> {
         let mut modules = self.plugin_instance.modules.write().unwrap();
 
@@ -46,7 +46,19 @@ impl PluginInstanceHandle {
         } else {
             self.plugin_instance
                 .debug(format!("registering module {}", name));
-            let module = Arc::new(Module::new(name, self.plugin_instance.name.clone()));
+
+            let mut display_name = None;
+            if let Value::Table(opts_table) = opts {
+                if let Ok(display_name_arg) = opts_table.get::<_, String>("display_name") {
+                    display_name = Some(display_name_arg)
+                }
+            }
+
+            let module = Arc::new(Module::new(
+                name,
+                self.plugin_instance.name.clone(),
+                display_name,
+            ));
             let module_handle = ModuleHandle {
                 module: module.clone(),
                 ctx: self.ctx.clone(),
@@ -462,7 +474,11 @@ struct ModuleHandle {
 }
 
 impl ModuleHandle {
-    fn register_action(&self, lua: &Lua, (name, callback): (String, Function)) -> mlua::Result<()> {
+    fn register_action(
+        &self,
+        lua: &Lua,
+        (name, callback, opts): (String, Function, Value),
+    ) -> mlua::Result<()> {
         let mut actions = self.module.actions.write().unwrap();
         if actions.iter().any(|a| a.name == name) {
             self.module.error(format!(
@@ -471,8 +487,20 @@ impl ModuleHandle {
             ));
         } else {
             self.module.debug(format!("registering action {}", name));
+
+            let mut display_name = None;
+            if let Value::Table(opts_table) = opts {
+                if let Ok(display_name_arg) = opts_table.get::<_, String>("display_name") {
+                    display_name = Some(display_name_arg);
+                }
+            }
+
             let key = lua.create_registry_value(callback)?;
-            let action = Action { name, key };
+            let action = Action {
+                name: name.clone(),
+                display_name,
+                key,
+            };
             actions.push(action);
         }
         Ok(())
@@ -567,8 +595,8 @@ impl UserData for ModuleHandle {
             Ok(())
         });
 
-        methods.add_method("register_action", |lua, this, (name, callback)| {
-            this.register_action(lua, (name, callback))
+        methods.add_method("register_action", |lua, this, args| {
+            this.register_action(lua, args)
         });
 
         methods.add_method("set_status", |_lua, this, status| this.set_status(status));
