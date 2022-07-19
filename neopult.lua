@@ -4,6 +4,8 @@
 -- The provided type annotations work well with the Lua language server
 -- (https://github.com/sumneko/lua-language-server).
 
+--- @diagnostic disable: unused-local
+
 --- @class PluginInstanceHandle
 PluginInstanceHandle = {}
 
@@ -223,7 +225,7 @@ function Store:unsubscribe(subscription) end
 
 
 
---- @diagnostic disable-next-line
+--- @diagnostic disable-next-line: lowercase-global
 neopult = {}
 
 
