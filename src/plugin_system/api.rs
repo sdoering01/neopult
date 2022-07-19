@@ -770,7 +770,7 @@ impl WindowHandle {
 
 impl UserData for WindowHandle {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("max", |lua, this, size| this.max(lua, size));
+        methods.add_method("max", |lua, this, args| this.max(lua, args));
         methods.add_method("min", |lua, this, ()| this.min(lua));
         methods.add_method("hide", |lua, this, ()| this.hide(lua));
         methods.add_method("unclaim", |lua, this, ()| this.unclaim(lua));
