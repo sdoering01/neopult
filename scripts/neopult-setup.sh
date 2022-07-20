@@ -18,6 +18,7 @@ CHANNEL_DEFAULTS_DIR="$NEOPULT_HOME/channel-defaults"
 NEOPULT_CHANNELS=6
 
 WORKING_DIR=$(pwd)
+NEOPULT_SOURCE="$WORKING_DIR/neopult"
 
 print_usage() {
     echo "Usage: $0 <install | channel-setup | full-install | uninstall | full-uninstall>"
@@ -25,7 +26,7 @@ print_usage() {
 }
 
 assert_repo_root() {
-    if ! [ -f "$WORKING_DIR/Cargo.toml" ]; then
+    if ! [ -f "$WORKING_DIR/Cargo.toml" ] || ! [ -f "$WORKING_DIR/Cargo.lock" ]; then
         echo "This action has to be run from the root of the neopult repository"
         exit 1
     fi
@@ -33,7 +34,7 @@ assert_repo_root() {
 
 assert_neopult_built() {
     if ! [ -x "$WORKING_DIR/target/release/neopult" ]; then
-        echo "Please build neopult first: cargo build --release"
+        echo "Please build neopult in release mode first: cargo build --release"
         exit 1
     fi
 }
@@ -49,15 +50,15 @@ install() {
     mkdir -p "$DATA_DIR"
 
     echo "Copying init-example.lua and neopult.lua"
-    cp "$WORKING_DIR/init-example.lua" "$WORKING_DIR/neopult.lua" "$DATA_DIR"
+    cp "$NEOPULT_SOURCE/init-example.lua" "$NEOPULT_SOURCE/neopult.lua" "$DATA_DIR"
 
     echo "Creating plugin directory"
     mkdir -p "$PLUGIN_DIR"
     echo "Copying plugins"
-    cp -ra "$WORKING_DIR/plugins/." "$PLUGIN_DIR"
+    cp -ra "$NEOPULT_SOURCE/plugins/." "$PLUGIN_DIR"
 
     echo "Copying web files"
-    cp -ra "$WORKING_DIR/web/." "$WEB_DIR"
+    cp -ra "$NEOPULT_SOURCE/web/." "$WEB_DIR"
 
     echo "Creating script directory"
     mkdir -p "$SCRIPT_DIR"
@@ -80,11 +81,11 @@ channel_setup() {
     mkdir -p "$CHANNEL_DEFAULTS_DIR/plugins"
 
     echo "Copying channel defaults"
-    cp -ra "$WORKING_DIR/plugins/." "$CHANNEL_DEFAULTS_DIR/plugins"
+    cp -ra "$NEOPULT_SOURCE/plugins/." "$CHANNEL_DEFAULTS_DIR/plugins"
     # Do not overwrite existing init script
-    cp -n "$WORKING_DIR/init-example.lua" "$CHANNEL_DEFAULTS_DIR/init.lua"
-    cp "$WORKING_DIR/assets/vnc/channel-banner.pdf" "$WORKING_DIR/assets/vnc/vncstartup" "$CHANNEL_DEFAULTS_DIR"
-    cp "$WORKING_DIR/assets/vnc/zathurarc" "$CHANNEL_DEFAULTS_DIR/.config/zathura"
+    cp -n "$NEOPULT_SOURCE/init-example.lua" "$CHANNEL_DEFAULTS_DIR/init.lua"
+    cp "$NEOPULT_SOURCE/assets/vnc/channel-banner.pdf" "$WORKING_DIR/assets/vnc/vncstartup" "$CHANNEL_DEFAULTS_DIR"
+    cp "$NEOPULT_SOURCE/assets/vnc/zathurarc" "$CHANNEL_DEFAULTS_DIR/.config/zathura"
 
     echo
     echo "First enter a STRONG and SECRET password, then enter 'y' and enter the public view-only password"

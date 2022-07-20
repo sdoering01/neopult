@@ -4,7 +4,7 @@ use std::{env, path::PathBuf};
 pub const GLOBAL_DATA_DIR: &str = "/usr/local/share/neopult";
 
 pub const WEB_ROOT: &str = if cfg!(debug_assertions) {
-    "web"
+    "neopult/web"
 } else {
     "/usr/local/share/neopult/web"
 };
