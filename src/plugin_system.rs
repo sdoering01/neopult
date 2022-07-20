@@ -493,6 +493,7 @@ impl PluginSystem {
 
         info!("starting event loop");
 
+        let mut event_loop_counter = 0;
         loop {
             // Inner block is necessary to drop the mutex guard, so that `run_later` can be called
             // from inside `run_later` tasks.
@@ -525,6 +526,12 @@ impl PluginSystem {
                 Some(event) => handle_event(&lua, &ctx, event),
                 None => break,
             };
+
+            event_loop_counter += 1;
+            if event_loop_counter > 10 {
+                event_loop_counter = 0;
+                lua.expire_registry_values()
+            }
         }
 
         info!("event loop finished");
