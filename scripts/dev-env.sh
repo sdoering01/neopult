@@ -20,7 +20,7 @@ else
 
     tmux new-window -t 2 -e 'DISPLAY=:5' -e 'RUST_LOG=debug' -e 'NEOPULT_CHANNEL=5' -e "NEOPULT_HOME=$(pwd)/neopult_home"
 
-    tmux new-window -t 3 -c web
+    tmux new-window -t 3 -c neopult/web
     tmux send -t 3 'nvim .'
 
 
