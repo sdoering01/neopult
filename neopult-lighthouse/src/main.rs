@@ -224,3 +224,83 @@ async fn channel_overview(Extension(state): Extension<Arc<State>>) -> impl IntoR
     let html = state.channel_overview_html.read().await.clone();
     Html(html)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_test_config() -> Config {
+        Config {
+            neopult_home: "irrelevant".to_string(),
+            novnc_base_url: "https://my-domain.com".to_string(),
+            rerender_interval_ms: Duration::from_millis(30000),
+            websockify_base_path: None,
+            websockify_port: None,
+            websockify_host: None,
+        }
+    }
+
+    #[test]
+    fn test_generate_channel_overview_html() {
+        let config = default_test_config();
+        let channels = [1, 3, 4];
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains("Channel 1"));
+        assert!(!html.contains("Channel 2"));
+        assert!(html.contains("Channel 3"));
+        assert!(html.contains("Channel 4"));
+        assert!(html.contains(r#"href="https://my-domain.com?"#));
+    }
+
+    #[test]
+    fn test_websockify_host_flag() {
+        let channels = [3, 7, 8, 12];
+
+        let args = Args::parse_from(["neopult-lighthouse"]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(!html.contains("&amp;host="));
+
+        let args = Args::parse_from(["neopult-lighthouse", "--websockify-host", "my-domain.com"]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains("&amp;host=my-domain.com"));
+    }
+
+    #[test]
+    fn test_websockify_base_path_flag() {
+        let channels = [5, 18, 37];
+
+        let args = Args::parse_from(["neopult-lighthouse"]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(!html.contains("&amp;path="));
+
+        let args = Args::parse_from(["neopult-lighthouse", "--websockify-base-path", "/channel/"]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains("&amp;path=/channel/5"));
+        assert!(html.contains("&amp;path=/channel/18"));
+        assert!(html.contains("&amp;path=/channel/37"));
+    }
+
+    #[test]
+    fn test_websockify_port_flag() {
+        let channels = [5, 8, 13];
+
+        let args = Args::parse_from(["neopult-lighthouse"]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains("&amp;port=6085"));
+        assert!(html.contains("&amp;port=6088"));
+        assert!(html.contains("&amp;port=6093"));
+
+        let args = Args::parse_from(["neopult-lighthouse", "--websockify-port", "443"]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains("&amp;port=443"));
+        assert!(!html.contains("&amp;port=6085"));
+        assert!(!html.contains("&amp;port=6088"));
+        assert!(!html.contains("&amp;port=6093"));
+    }
+}
