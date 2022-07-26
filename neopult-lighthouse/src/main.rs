@@ -34,8 +34,13 @@ struct Args {
     neopult_home: String,
 
     /// Should point the vnc.html of novnc; query parameters (?...) will be appended
-    #[clap(short = 'u', long, value_name = "URL")]
-    novnc_base_url: Option<String>,
+    #[clap(
+        short = 'u',
+        long,
+        value_name = "URL",
+        default_value = "http://localhost:6080/vnc.html"
+    )]
+    novnc_base_url: String,
 
     /// Host on which websockify can be reached by the noVNC client. If not given, noVNC will use
     /// the same host, on which it is hosted.
@@ -69,9 +74,7 @@ impl From<Args> for Config {
         Config {
             rerender_interval_ms: Duration::from_millis(args.rerender_interval_ms),
             neopult_home: args.neopult_home,
-            novnc_base_url: args
-                .novnc_base_url
-                .unwrap_or_else(|| "http://localhost:6080/vnc.html".to_string()),
+            novnc_base_url: args.novnc_base_url,
             websockify_host: args.websockify_host,
             websockify_base_path: args.websockify_base_path,
             websockify_port: args.websockify_port,
