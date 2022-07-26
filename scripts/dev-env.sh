@@ -9,6 +9,7 @@
 #  - nvim
 #  - python
 #  - novnc
+#  - tigervnc
 
 if [ -z $TMUX ]; then
     tmux new-session "$0"
@@ -43,6 +44,10 @@ else
 
     tmux new-window -t 7 -c ../yesvnc/public -n yesvnc
     tmux send -t 7 'python -m http.server 3001'
+
+    # Path is for Arch Linux, might differ for other distros
+    tmux new-window -t 12 -c /usr/share/webapps/novnc -n novnc-web
+    tmux send -t 12 'python -m http.server 6080'
 
     if $neopult_setup; then
         tmux select-window -t 1
