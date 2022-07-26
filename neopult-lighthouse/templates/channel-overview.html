@@ -11,7 +11,7 @@
         {% for channel in channels %}
             <li>
                 {% let admin_port = 4200 + channel.number %}
-                <b>Channel {{ channel.number }}:</b> <a href="{{ channel.novnc_url }}">View</a> <a href="http://localhost:{{ admin_port }}">Admin</a>
+                <b>Channel {{ channel.number }}:</b> <a href="{{ channel.novnc_url }}">View</a> <a href="{{ channel.neopult_url }}">Admin</a>
             </li>
         {% endfor %}
         </ul>

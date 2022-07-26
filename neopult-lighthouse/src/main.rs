@@ -19,6 +19,7 @@ const IS_DEV: bool = cfg!(debug_assertions);
 struct ChannelInfo {
     number: u8,
     novnc_url: String,
+    neopult_url: String,
 }
 
 /// Neopult channel overview page that guides you to your channel
@@ -32,6 +33,16 @@ struct Args {
     /// Neopult home
     #[clap(short = 'n', long, value_name = "HOME", default_value = if IS_DEV { "neopult_home" } else { "/home/neopult" })]
     neopult_home: String,
+
+    /// Template for the neopult interface url. {{CHANNEL}} will be substitued with the channel
+    /// number. {{PORT}} will be substituted with the port of the channel (4200 + channel).
+    #[clap(
+        short = 't',
+        long,
+        value_name = "URL_TEMPLATE",
+        default_value = "http://localhost:{{PORT}}"
+    )]
+    neopult_url_template: String,
 
     /// Should point the vnc.html of novnc; query parameters (?...) will be appended
     #[clap(
@@ -63,6 +74,7 @@ struct Args {
 struct Config {
     rerender_interval_ms: Duration,
     neopult_home: String,
+    neopult_url_template: String,
     novnc_base_url: String,
     websockify_host: Option<String>,
     websockify_base_path: Option<String>,
@@ -74,6 +86,7 @@ impl From<Args> for Config {
         Config {
             rerender_interval_ms: Duration::from_millis(args.rerender_interval_ms),
             neopult_home: args.neopult_home,
+            neopult_url_template: args.neopult_url_template,
             novnc_base_url: args.novnc_base_url,
             websockify_host: args.websockify_host,
             websockify_base_path: args.websockify_base_path,
@@ -140,9 +153,15 @@ fn generate_channel_overview_html(config: &Config, channels: &[u8]) -> askama::R
             if let Some(ref websockify_base_path) = config.websockify_base_path {
                 novnc_url = format!("{}&path={}{}", novnc_url, websockify_base_path, channel);
             }
+
+            let mut neopult_url = config.neopult_url_template.clone();
+            neopult_url = neopult_url.replace("{{PORT}}", &(4200 + (channel as u16)).to_string());
+            neopult_url = neopult_url.replace("{{CHANNEL}}", &channel.to_string());
+
             ChannelInfo {
                 number: channel,
                 novnc_url,
+                neopult_url,
             }
         })
         .collect::<Vec<_>>();
@@ -235,6 +254,7 @@ mod tests {
     fn default_test_config() -> Config {
         Config {
             neopult_home: "irrelevant".to_string(),
+            neopult_url_template: "https://neopult.my-domain.com/{{CHANNEL}}".to_string(),
             novnc_base_url: "https://my-domain.com".to_string(),
             rerender_interval_ms: Duration::from_millis(30000),
             websockify_base_path: None,
@@ -253,6 +273,42 @@ mod tests {
         assert!(html.contains("Channel 3"));
         assert!(html.contains("Channel 4"));
         assert!(html.contains(r#"href="https://my-domain.com?"#));
+    }
+
+    #[test]
+    fn test_neopult_url_template_flag() {
+        let channels = [6, 22, 37];
+
+        let args = Args::parse_from([
+            "neopult-lighthouse",
+            "--neopult-url-template",
+            "https://neopult.my-domain.com",
+        ]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains(r#"href="https://neopult.my-domain.com""#));
+
+        let args = Args::parse_from([
+            "neopult-lighthouse",
+            "--neopult-url-template",
+            "https://neopult.my-domain.com:{{PORT}}",
+        ]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains(r#"href="https://neopult.my-domain.com:4206""#));
+        assert!(html.contains(r#"href="https://neopult.my-domain.com:4222""#));
+        assert!(html.contains(r#"href="https://neopult.my-domain.com:4237""#));
+
+        let args = Args::parse_from([
+            "neopult-lighthouse",
+            "--neopult-url-template",
+            "https://my-domain.com/neopult/{{CHANNEL}}/admin",
+        ]);
+        let config = Config::from(args);
+        let html = generate_channel_overview_html(&config, &channels).unwrap();
+        assert!(html.contains(r#"href="https://my-domain.com/neopult/6/admin""#));
+        assert!(html.contains(r#"href="https://my-domain.com/neopult/22/admin""#));
+        assert!(html.contains(r#"href="https://my-domain.com/neopult/37/admin""#));
     }
 
     #[test]
