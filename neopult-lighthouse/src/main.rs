@@ -42,6 +42,10 @@ struct Args {
     #[clap(short = 'p', long, value_name = "PORT", default_value = "4199")]
     port: u16,
 
+    /// Show channels even when they are hidden via a `lighthouse_hide` file.
+    #[clap(long)]
+    show_hidden_channels: bool,
+
     /// Neopult home
     #[clap(short = 'n', long, value_name = "HOME", default_value = if IS_DEV { "neopult_home" } else { "/home/neopult" })]
     neopult_home: String,
@@ -86,6 +90,7 @@ struct Args {
 struct Config {
     rerender_interval_ms: Duration,
     port: u16,
+    show_hidden_channels: bool,
     neopult_home: String,
     neopult_url_template: String,
     novnc_base_url: String,
@@ -99,6 +104,7 @@ impl From<Args> for Config {
         Config {
             rerender_interval_ms: Duration::from_millis(args.rerender_interval_ms),
             port: args.port,
+            show_hidden_channels: args.show_hidden_channels,
             neopult_home: args.neopult_home,
             neopult_url_template: args.neopult_url_template,
             novnc_base_url: args.novnc_base_url,
@@ -199,8 +205,14 @@ fn read_channels(config: &Config) -> io::Result<Vec<u8>> {
                     .strip_prefix("channel-")
                 {
                     Some(channel_name) => {
-                        let channel_number = channel_name.parse().ok()?;
-                        Some(channel_number)
+                        if !config.show_hidden_channels
+                            && channel.path().join("lighthouse_hide").is_file()
+                        {
+                            None
+                        } else {
+                            let channel_number = channel_name.parse().ok()?;
+                            Some(channel_number)
+                        }
                     }
                     _ => None,
                 }
@@ -280,6 +292,7 @@ mod tests {
         Config {
             neopult_home: "irrelevant".to_string(),
             port: 4199,
+            show_hidden_channels: false,
             neopult_url_template: "https://neopult.my-domain.com/{{CHANNEL}}".to_string(),
             novnc_base_url: "https://my-domain.com".to_string(),
             rerender_interval_ms: Duration::from_millis(30000),
