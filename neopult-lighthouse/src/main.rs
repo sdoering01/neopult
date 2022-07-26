@@ -116,7 +116,7 @@ async fn generate_channel_overview_html(
 
 fn read_channels(config: &Config) -> io::Result<Vec<ChannelInfo>> {
     let channel_entries = fs::read_dir(&config.neopult_home)?;
-    let channels = channel_entries
+    let mut channels = channel_entries
         .into_iter()
         .flatten()
         .flat_map(|channel| {
@@ -139,7 +139,8 @@ fn read_channels(config: &Config) -> io::Result<Vec<ChannelInfo>> {
                 None
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
+    channels.sort_by_key(|c| c.number);
     Ok(channels)
 }
 
