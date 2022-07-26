@@ -4,16 +4,26 @@
         <title>Neopult Lighthouse</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="./static/style.css">
     </head>
     <body>
-        <h1>Neopult Lighthouse</h1>
-        <ul>
-        {% for channel in channels %}
-            <li>
-                {% let admin_port = 4200 + channel.number %}
-                <b>Channel {{ channel.number }}:</b> <a href="{{ channel.novnc_url }}">View</a> <a href="{{ channel.neopult_url }}">Admin</a>
-            </li>
-        {% endfor %}
-        </ul>
+        <main>
+            <header class="main-header">
+                <h1 class="main-title">Neopult Lighthouse</h1>
+                <h2 class="sub-title">Guiding you to your lecture</h2>
+            </header>
+            <ul class="channel-list">
+            {% for channel in channels %}
+                <li class="channel-item">
+                    {% let admin_port = 4200 + channel.number %}
+                    <h3 class="channel-item__header">Channel {{ channel.number }}</h3>
+                    <div class="channel-item__body">
+                        <a class="channel-item__link" href="{{ channel.novnc_url }}">View</a>
+                        <a class="channel-item__link" href="{{ channel.neopult_url }}">Admin</a>
+                    </div>
+                </li>
+            {% endfor %}
+            </ul>
+        </main>
     </body>
 </html>

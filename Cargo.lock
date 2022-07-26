@@ -671,6 +671,7 @@ dependencies = [
  "env_logger",
  "log",
  "tokio",
+ "tower-http",
 ]
 
 [[package]]

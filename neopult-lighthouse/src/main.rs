@@ -1,7 +1,8 @@
 use askama::Template;
 use axum::{
+    http::StatusCode,
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{get, get_service},
     Extension, Router,
 };
 use clap::Parser;
@@ -12,8 +13,15 @@ use tokio::{
     sync::RwLock,
     time::{self, Duration},
 };
+use tower_http::services::ServeDir;
 
 const IS_DEV: bool = cfg!(debug_assertions);
+
+const STATIC_ROOT: &str = if IS_DEV {
+    "neopult-lighthouse/static"
+} else {
+    "/usr/local/share/neopult/lighthouse/static"
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ChannelInfo {
@@ -240,6 +248,10 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(channel_overview))
+        .nest(
+            "/static",
+            get_service(ServeDir::new(STATIC_ROOT)).handle_error(handle_error),
+        )
         .layer(Extension(state));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -248,6 +260,11 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+async fn handle_error(err: io::Error) -> impl IntoResponse {
+    error!("static serve dir error: {}", err);
+    (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong...")
 }
 
 async fn channel_overview(Extension(state): Extension<Arc<State>>) -> impl IntoResponse {
