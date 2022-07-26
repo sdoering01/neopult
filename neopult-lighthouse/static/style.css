@@ -38,6 +38,11 @@ main {
     font-weight: 500;
 }
 
+.no-channels-msg {
+    font-weight: 500;
+    font-size: 2rem;
+}
+
 .channel-list {
     display: flex;
     align-items: center;

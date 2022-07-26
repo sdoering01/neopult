@@ -12,18 +12,22 @@
                 <h1 class="main-title">Neopult Lighthouse</h1>
                 <h2 class="sub-title">Guiding you to your lecture</h2>
             </header>
-            <ul class="channel-list">
-            {% for channel in channels %}
-                <li class="channel-item">
-                    {% let admin_port = 4200 + channel.number %}
-                    <h3 class="channel-item__header">Channel {{ channel.number }}</h3>
-                    <div class="channel-item__body">
-                        <a class="channel-item__link" href="{{ channel.novnc_url }}">View</a>
-                        <a class="channel-item__link" href="{{ channel.neopult_url }}">Admin</a>
-                    </div>
-                </li>
-            {% endfor %}
-            </ul>
+            {% if channels.len() == 0 %}
+                <div class="no-channels-msg">Looks like there are no channels</div>
+            {% else %}
+                <ul class="channel-list">
+                {% for channel in channels %}
+                    <li class="channel-item">
+                        {% let admin_port = 4200 + channel.number %}
+                        <h3 class="channel-item__header">Channel {{ channel.number }}</h3>
+                        <div class="channel-item__body">
+                            <a class="channel-item__link" href="{{ channel.novnc_url }}">View</a>
+                            <a class="channel-item__link" href="{{ channel.neopult_url }}">Admin</a>
+                        </div>
+                    </li>
+                {% endfor %}
+                </ul>
+            {% endif %}
         </main>
     </body>
 </html>
