@@ -15,9 +15,10 @@ use tokio::{
 
 const IS_DEV: bool = cfg!(debug_assertions);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ChannelInfo {
-    number: i32,
+    number: u8,
+    novnc_url: String,
 }
 
 /// Neopult channel overview page that guides you to your channel
@@ -29,12 +30,28 @@ struct Args {
     rerender_interval_ms: u64,
 
     /// Neopult home
-    #[clap(short = 'h', long, value_name = "HOME", default_value = if IS_DEV { "neopult_home" } else { "/home/neopult" })]
+    #[clap(short = 'n', long, value_name = "HOME", default_value = if IS_DEV { "neopult_home" } else { "/home/neopult" })]
     neopult_home: String,
 
-    /// noVNC base URL; query parameters (?...) will be appended
+    /// Should point the vnc.html of novnc; query parameters (?...) will be appended
     #[clap(short = 'u', long, value_name = "URL")]
     novnc_base_url: Option<String>,
+
+    /// Host on which websockify can be reached by the noVNC client. If not given, noVNC will use
+    /// the same host, on which it is hosted.
+    #[clap(short = 'w', long, value_name = "HOST")]
+    websockify_host: Option<String>,
+
+    /// If given, the channel number will be appended and the result will be used as the path to
+    /// reach websockify on the websockify-host.
+    #[clap(short = 'b', long, value_name = "BASE_PATH")]
+    websockify_base_path: Option<String>,
+
+    /// Port on which websockify can be reached by the noVNC client. If given, this port will be
+    /// used for all channels. This can be useful when running websockify behind a reverse proxxy.
+    /// Defaults to 6080 + channel_number.
+    #[clap(short = 'p', long, value_name = "PORT")]
+    websockify_port: Option<u16>,
 }
 
 #[derive(Debug)]
@@ -42,6 +59,9 @@ struct Config {
     rerender_interval_ms: Duration,
     neopult_home: String,
     novnc_base_url: String,
+    websockify_host: Option<String>,
+    websockify_base_path: Option<String>,
+    websockify_port: Option<u16>,
 }
 
 impl From<Args> for Config {
@@ -51,7 +71,10 @@ impl From<Args> for Config {
             neopult_home: args.neopult_home,
             novnc_base_url: args
                 .novnc_base_url
-                .unwrap_or("http://localhost:6080/vnc.html".to_string()),
+                .unwrap_or_else(|| "http://localhost:6080/vnc.html".to_string()),
+            websockify_host: args.websockify_host,
+            websockify_base_path: args.websockify_base_path,
+            websockify_port: args.websockify_port,
         }
     }
 }
@@ -60,14 +83,13 @@ impl From<Args> for Config {
 #[template(path = "channel-overview.html")]
 struct ChannelOverviewTemplate<'a> {
     channels: &'a [ChannelInfo],
-    novnc_base_url: &'a str,
 }
 
 struct State {
     channel_overview_html: Arc<RwLock<String>>,
 }
 
-async fn rerender_loop(config: Config, mut channels: Vec<ChannelInfo>, state: Arc<State>) {
+async fn rerender_loop(config: Config, mut channels: Vec<u8>, state: Arc<State>) {
     // Leak config so it can be passed to the blocking task. This is no problem since this function
     // will run until program termination anyways, thus the config effettively has a static
     // lifetime.
@@ -98,23 +120,39 @@ async fn rerender_loop(config: Config, mut channels: Vec<ChannelInfo>, state: Ar
 
 async fn generate_channel_overview_html(
     config: &Config,
-    channels: &Vec<ChannelInfo>,
+    channels: &[u8],
     state: &State,
 ) -> askama::Result<()> {
-    // TODO: Add port (either None for 6080 + channel or Some(port) for the same port for all
-    // channel, for running behind a reverse proxy)
-    // TODO: Add websockify base path (will append channel number)
-    // TODO: Add host
+    let channel_info = channels
+        .iter()
+        .map(|&channel| {
+            let websockify_port = config.websockify_port.unwrap_or(6080 + (channel as u16));
+            let janus_room = 1000 + (channel as u16);
+            let mut novnc_url = format!(
+                "{}?view_only=1&reconnect=1&bell=0&resize=scale&port={}&room={}",
+                config.novnc_base_url, websockify_port, janus_room
+            );
+            if let Some(ref websockify_host) = config.websockify_host {
+                novnc_url = format!("{}&host={}", novnc_url, websockify_host);
+            }
+            if let Some(ref websockify_base_path) = config.websockify_base_path {
+                novnc_url = format!("{}&path={}{}", novnc_url, websockify_base_path, channel);
+            }
+            ChannelInfo {
+                number: channel,
+                novnc_url,
+            }
+        })
+        .collect::<Vec<_>>();
     let template = ChannelOverviewTemplate {
-        channels,
-        novnc_base_url: &config.novnc_base_url,
+        channels: &channel_info,
     };
     let channel_overview_html = template.render()?;
     *state.channel_overview_html.write().await = channel_overview_html;
     Ok(())
 }
 
-fn read_channels(config: &Config) -> io::Result<Vec<ChannelInfo>> {
+fn read_channels(config: &Config) -> io::Result<Vec<u8>> {
     let channel_entries = fs::read_dir(&config.neopult_home)?;
     let mut channels = channel_entries
         .into_iter()
@@ -129,9 +167,7 @@ fn read_channels(config: &Config) -> io::Result<Vec<ChannelInfo>> {
                 {
                     Some(channel_name) => {
                         let channel_number = channel_name.parse().ok()?;
-                        Some(ChannelInfo {
-                            number: channel_number,
-                        })
+                        Some(channel_number)
                     }
                     _ => None,
                 }
@@ -140,7 +176,7 @@ fn read_channels(config: &Config) -> io::Result<Vec<ChannelInfo>> {
             }
         })
         .collect::<Vec<_>>();
-    channels.sort_by_key(|c| c.number);
+    channels.sort_unstable();
     Ok(channels)
 }
 
@@ -160,7 +196,7 @@ async fn main() {
     let channels = match read_channels(&config) {
         Ok(channels) => channels,
         Err(e) => {
-            eprintln!("Failed to read channels {}", e);
+            eprintln!("Failed to read channels: {}", e);
             process::exit(1);
         }
     };

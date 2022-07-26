@@ -10,10 +10,8 @@
         <ul>
         {% for channel in channels %}
             <li>
-                {% let port = 6080 + channel.number %}
-                {% let room = 1000 + channel.number %}
                 {% let admin_port = 4200 + channel.number %}
-                <b>Channel {{ channel.number }}:</b> <a href="{{ novnc_base_url }}?view_only=1&reconnect=1&bell=0&resize=scale&port={{ port }}&room={{ room }}">View</a> <a href="http://localhost:{{ admin_port }}">Admin</a>
+                <b>Channel {{ channel.number }}:</b> <a href="{{ channel.novnc_url }}">View</a> <a href="http://localhost:{{ admin_port }}">Admin</a>
             </li>
         {% endfor %}
         </ul>
