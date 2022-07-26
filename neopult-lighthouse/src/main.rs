@@ -102,8 +102,11 @@ async fn rerender_loop(config: Config, mut channels: Vec<u8>, state: Arc<State>)
             Ok(Ok(new_channels)) => {
                 if new_channels != channels {
                     debug!("channels changed -- rerendering");
-                    match generate_channel_overview_html(config, &new_channels, &state).await {
-                        Ok(_) => channels = new_channels,
+                    match generate_channel_overview_html(config, &new_channels) {
+                        Ok(html) => {
+                            channels = new_channels;
+                            *state.channel_overview_html.write().await = html;
+                        }
                         Err(e) => error!("Failed to render channel overview template: {}", e),
                     }
                 }
@@ -118,11 +121,7 @@ async fn rerender_loop(config: Config, mut channels: Vec<u8>, state: Arc<State>)
     }
 }
 
-async fn generate_channel_overview_html(
-    config: &Config,
-    channels: &[u8],
-    state: &State,
-) -> askama::Result<()> {
+fn generate_channel_overview_html(config: &Config, channels: &[u8]) -> askama::Result<String> {
     let channel_info = channels
         .iter()
         .map(|&channel| {
@@ -147,9 +146,7 @@ async fn generate_channel_overview_html(
     let template = ChannelOverviewTemplate {
         channels: &channel_info,
     };
-    let channel_overview_html = template.render()?;
-    *state.channel_overview_html.write().await = channel_overview_html;
-    Ok(())
+    template.render()
 }
 
 fn read_channels(config: &Config) -> io::Result<Vec<u8>> {
@@ -189,10 +186,6 @@ async fn main() {
     let config = Config::from(args);
     debug!("Got config: {:?}", config);
 
-    let state = Arc::new(State {
-        channel_overview_html: Arc::new(RwLock::new(String::new())),
-    });
-
     let channels = match read_channels(&config) {
         Ok(channels) => channels,
         Err(e) => {
@@ -201,10 +194,17 @@ async fn main() {
         }
     };
 
-    if let Err(e) = generate_channel_overview_html(&config, &channels, &state).await {
-        eprintln!("Failed to render channel overview template: {}", e);
-        process::exit(1);
-    }
+    let html = match generate_channel_overview_html(&config, &channels) {
+        Ok(html) => html,
+        Err(e) => {
+            eprintln!("Failed to render channel overview template: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let state = Arc::new(State {
+        channel_overview_html: Arc::new(RwLock::new(html)),
+    });
 
     tokio::spawn(rerender_loop(config, channels, state.clone()));
 
