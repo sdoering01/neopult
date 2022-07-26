@@ -30,6 +30,10 @@ struct Args {
     #[clap(short = 'i', long, value_name = "MS", default_value = "30000")]
     rerender_interval_ms: u64,
 
+    /// Port on which lighthouse should run.
+    #[clap(short = 'p', long, value_name = "PORT", default_value = "4199")]
+    port: u16,
+
     /// Neopult home
     #[clap(short = 'n', long, value_name = "HOME", default_value = if IS_DEV { "neopult_home" } else { "/home/neopult" })]
     neopult_home: String,
@@ -66,13 +70,14 @@ struct Args {
     /// Port on which websockify can be reached by the noVNC client. If given, this port will be
     /// used for all channels. This can be useful when running websockify behind a reverse proxxy.
     /// Defaults to 6080 + channel_number.
-    #[clap(short = 'p', long, value_name = "PORT")]
+    #[clap(short = 's', long, value_name = "PORT")]
     websockify_port: Option<u16>,
 }
 
 #[derive(Debug)]
 struct Config {
     rerender_interval_ms: Duration,
+    port: u16,
     neopult_home: String,
     neopult_url_template: String,
     novnc_base_url: String,
@@ -85,6 +90,7 @@ impl From<Args> for Config {
     fn from(args: Args) -> Self {
         Config {
             rerender_interval_ms: Duration::from_millis(args.rerender_interval_ms),
+            port: args.port,
             neopult_home: args.neopult_home,
             neopult_url_template: args.neopult_url_template,
             novnc_base_url: args.novnc_base_url,
@@ -228,13 +234,15 @@ async fn main() {
         channel_overview_html: Arc::new(RwLock::new(html)),
     });
 
+    let port = config.port;
+
     tokio::spawn(rerender_loop(config, channels, state.clone()));
 
     let app = Router::new()
         .route("/", get(channel_overview))
         .layer(Extension(state));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 4199));
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
     debug!("Listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
@@ -254,6 +262,7 @@ mod tests {
     fn default_test_config() -> Config {
         Config {
             neopult_home: "irrelevant".to_string(),
+            port: 4199,
             neopult_url_template: "https://neopult.my-domain.com/{{CHANNEL}}".to_string(),
             novnc_base_url: "https://my-domain.com".to_string(),
             rerender_interval_ms: Duration::from_millis(30000),
