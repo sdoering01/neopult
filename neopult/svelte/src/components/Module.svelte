@@ -1,11 +1,13 @@
 <script lang="ts">
     import { type Module, callAction } from '$lib/neopult';
+    import Button from '$components/Button.svelte';
 
     export let pluginInstanceName: string;
     export let module: Module;
 
     let statusClasses = '';
     $: {
+        // TODO: Replace with an additional variable that is independent from the status text
         if (module.status === 'waiting') {
             statusClasses = 'bg-yellow-500';
         } else if (module.status === 'active') {
@@ -17,7 +19,7 @@
 </script>
 
 <div
-    class="relative flex flex-col p-4 pl-7 rounded-lg bg-slate-900 text-white break-words w-full max-w-full"
+    class="relative flex flex-col p-4 pl-7 rounded-lg bg-slate-900 text-white break-words w-full max-w-full shadow-sm"
 >
     <span
         class="absolute left-3 top-0 bottom-0 my-4 w-1.5 rounded-full transition {statusClasses}"
@@ -32,14 +34,8 @@
     </h3>
     <div class="flex items-center flex-wrap mt-2 gap-2">
         {#each Object.values(module.actions) as action (action.name)}
-            <button
-                class={`w-full outline-none px-2 py-1 rounded-md text-black transition xs:w-auto ${
-                    action.active
-                        ? 'bg-slate-400 focus-visible:outline-slate-400'
-                        : 'bg-slate-200 focus-visible:outline-slate-200'
-                }`}
-                on:click={() => callAction(pluginInstanceName, module.name, action.name)}
-                >{action.displayName}</button
+            <Button active={action.active} on:click={() => callAction(pluginInstanceName, module.name, action.name)}
+                >{action.displayName}</Button
             >
         {/each}
     </div>

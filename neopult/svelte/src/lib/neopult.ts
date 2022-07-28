@@ -1,9 +1,19 @@
 import { writable } from 'svelte/store';
 
+export enum SocketError {
+    STORED_PASSWORD_INCORRECT,
+    PASSWORD_INCORRECT,
+    AUTH_TIMEOUT,
+}
+
 export interface SocketConnectionState {
     connecting: boolean;
+    tryingReconnect: boolean;
+    reconnectTry: number;
+    reconnectInMs: number;
     connected: boolean;
     initialConnect: boolean;
+    error: SocketError | null;
 }
 
 export interface Action {
@@ -35,27 +45,136 @@ export interface NeopultState {
     };
 }
 
-let socket: WebSocket;
-let requestId = 0;
-
 export const socketConnectionStore = writable<SocketConnectionState>({
     connecting: false,
+    tryingReconnect: false,
+    reconnectTry: 0,
+    reconnectInMs: 0,
     connected: false,
     initialConnect: true,
+    error: null,
 });
 
 export const neopultStore = writable<NeopultState>({
     pluginInstances: {},
 });
 
-const connect = () => {
+// NOTE: Make sure to adjust the timeout when changing the ping interval on the server
+const CONNECTION_TIMEOUT_MS = 10000;
+const RECONNECT_INTERVALS_MS = [1000, 3000, 10000];
+
+const SOCKET_DISCONNECT_REASON_AUTH = 'auth';
+const SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT = 'auth_timeout';
+const SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT = 'client_logout';
+
+let socket: WebSocket;
+let requestId = 0;
+let cachedPassword = '';
+
+let heartbeatTimeout: NodeJS.Timeout;
+let reconnectTimeout: NodeJS.Timeout;
+let reconnectUpdateInterval: NodeJS.Timer;
+
+const heartbeat = () => {
+    clearTimeout(heartbeatTimeout);
+    heartbeatTimeout = setTimeout(() => {
+        console.log('connection timed out');
+        socket.close();
+        handleDisconnect('');
+    }, CONNECTION_TIMEOUT_MS);
+};
+
+export const reconnect = () => {
+    clearReconnectTimers();
+    connect(cachedPassword);
+};
+
+const scheduleReconnect = (reconnectTry: number) => {
+    let reconnectIntervalIdx = reconnectTry - 1;
+    if (reconnectIntervalIdx >= RECONNECT_INTERVALS_MS.length) {
+        reconnectIntervalIdx = RECONNECT_INTERVALS_MS.length - 1;
+    }
+    let reconnectIn = RECONNECT_INTERVALS_MS[reconnectIntervalIdx];
+    reconnectTimeout = setTimeout(reconnect, reconnectIn);
+    reconnectUpdateInterval = setInterval(() => {
+        reconnectIn -= 1000;
+        socketConnectionStore.update((state) => {
+            state.reconnectInMs = reconnectIn;
+            return state;
+        });
+    }, 1000);
+    return reconnectIn;
+};
+
+const clearReconnectTimers = () => {
+    clearTimeout(reconnectTimeout);
+    clearInterval(reconnectUpdateInterval);
+}
+
+export const logout = () => {
+    clearReconnectTimers();
+    handleDisconnect(SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT);
+};
+
+// TODO: Handle reason for logout
+const handleDisconnect = (reason: string) => {
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+
+    clearTimeout(heartbeatTimeout);
+
+    socketConnectionStore.update((state) => {
+        state.connecting = false;
+        state.connected = false;
+
+        if (reason === SOCKET_DISCONNECT_REASON_AUTH) {
+            // TODO: If has stored password: Remove stored password and set reason accordingly
+            state.error = SocketError.PASSWORD_INCORRECT;
+            state.initialConnect = true;
+        } else if (reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
+            state.error = SocketError.AUTH_TIMEOUT;
+        } else if (reason === SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT) {
+            state.initialConnect = true;
+            state.error = null;
+        }
+
+        const shouldReconnect =
+            reason !== SOCKET_DISCONNECT_REASON_AUTH &&
+            reason !== SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT &&
+            reason !== SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT;
+        if (shouldReconnect) {
+            if (state.tryingReconnect) {
+                state.reconnectTry += 1;
+            } else {
+                state.tryingReconnect = true;
+                state.reconnectTry = 1;
+            }
+            state.reconnectInMs = scheduleReconnect(state.reconnectTry);
+        } else {
+            state.tryingReconnect = false;
+        }
+
+        return state;
+    });
+};
+
+export const connect = (password: string) => {
+    console.log('Connecting with password:', password);
     socket = new WebSocket('ws://localhost:4205/ws');
+    cachedPassword = password;
 
-    socket.onopen = () => {
-        console.log('socket open');
+    socketConnectionStore.update((state) => {
+        state.connecting = true;
+        state.error = null;
+        return state;
+    });
 
-        // TODO: Read from user
-        socket.send('Password neopult');
+    socket.onopen = (event) => {
+        console.log('socket open', event);
+        clearReconnectTimers();
+        socket.send('Password ' + password);
     };
 
     socket.onmessage = (event) => {
@@ -70,16 +189,21 @@ const connect = () => {
         }
 
         if (msg == 'ping') {
-            // TODO: Heartbeat
+            heartbeat();
             socket.send('"pong"');
         } else if (msg == 'pong') {
-            // TODO: Heartbeat
+            heartbeat();
         } else if (msg.system_info) {
             socketConnectionStore.set({
                 connecting: false,
+                tryingReconnect: false,
+                reconnectTry: 0,
+                reconnectInMs: 0,
                 connected: true,
                 initialConnect: false,
+                error: null,
             });
+            cachedPassword = password;
 
             const neopultState: NeopultState = { pluginInstances: {} };
             for (const pluginInstance of msg.system_info.plugin_instances) {
@@ -147,14 +271,13 @@ const connect = () => {
         }
     };
 
-    socket.onclose = () => {
-        console.log('socket close');
+    socket.onerror = (event) => {
+        console.error('socket error', event);
+    };
 
-        socketConnectionStore.update((state) => ({
-            connecting: false,
-            connected: false,
-            initialConnect: state.initialConnect,
-        }));
+    socket.onclose = (event) => {
+        console.log('socket close', event);
+        handleDisconnect(event.reason);
     };
 };
 
@@ -175,5 +298,3 @@ export const callAction = (pluginInstance: string, module: string, action: strin
     const json = JSON.stringify(request);
     socket.send(json);
 };
-
-connect();
