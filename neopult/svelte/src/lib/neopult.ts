@@ -113,10 +113,10 @@ const clearReconnectTimers = () => {
 
 export const logout = () => {
     clearReconnectTimers();
+    socket.close();
     handleDisconnect(SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT);
 };
 
-// TODO: Handle reason for logout
 const handleDisconnect = (reason: string) => {
     socket.onopen = null;
     socket.onmessage = null;
@@ -161,7 +161,7 @@ const handleDisconnect = (reason: string) => {
 };
 
 export const connect = (password: string) => {
-    console.log('Connecting with password:', password);
+    console.log('Connecting');
     socket = new WebSocket('ws://localhost:4205/ws');
     cachedPassword = password;
 

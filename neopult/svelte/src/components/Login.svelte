@@ -15,7 +15,7 @@
         <h1 class="text-4xl font-semibold text-center mb-6">Neopult</h1>
 
         {#if $socketConnectionStore.error || (!$socketConnectionStore.connecting && $socketConnectionStore.tryingReconnect)}
-            <div class="bg-red-400 text-black text-center mb-2 p-2 rounded-md">
+            <div class="flex flex-col gap-1 items-center bg-red-400 text-black text-center mb-2 p-2 rounded-md">
                 {#if $socketConnectionStore.error === SocketError.PASSWORD_INCORRECT}
                     Password incorrect
                 {:else if $socketConnectionStore.error === SocketError.STORED_PASSWORD_INCORRECT}
@@ -24,7 +24,7 @@
                     Socket authentication timed out
                 {:else if !$socketConnectionStore.connecting && $socketConnectionStore.tryingReconnect}
                     Connection failed <Button on:click={reconnect}
-                        >Connect (retying in {Math.ceil(
+                        >Connect (retrying in {Math.ceil(
                             $socketConnectionStore.reconnectInMs / 1000
                         )})</Button
                     >
