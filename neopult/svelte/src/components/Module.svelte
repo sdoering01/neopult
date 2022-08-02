@@ -35,6 +35,7 @@
     <div class="flex items-center flex-wrap mt-2 gap-2">
         {#each Object.values(module.actions) as action (action.name)}
             <Button
+                responsive
                 active={action.active}
                 on:click={() => callAction(pluginInstanceName, module.name, action.name)}
                 >{action.displayName}</Button
