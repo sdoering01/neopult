@@ -14,7 +14,7 @@
 
 <!-- <pre>{JSON.stringify($socketConnectionStore, null, 2)}</pre> -->
 
-{#if !$socketConnectionStore.connected && $socketConnectionStore.initialConnect}
+{#if !$socketConnectionStore.connected && !$socketConnectionStore.authenticated}
     <Login />
 {:else}
     <App />

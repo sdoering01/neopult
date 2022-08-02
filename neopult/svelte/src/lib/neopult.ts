@@ -14,7 +14,7 @@ export interface SocketConnectionState {
     reconnectTry: number;
     reconnectInMs: number;
     connected: boolean;
-    initialConnect: boolean;
+    authenticated: boolean;
     error: SocketError | null;
 }
 
@@ -53,7 +53,7 @@ export const socketConnectionStore = writable<SocketConnectionState>({
     reconnectTry: 0,
     reconnectInMs: 0,
     connected: false,
-    initialConnect: true,
+    authenticated: false,
     error: null,
 });
 
@@ -154,14 +154,14 @@ const handleDisconnect = (reason: string) => {
             } else {
                 state.error = SocketError.PASSWORD_INCORRECT;
             }
-            state.initialConnect = true;
+            state.authenticated = false;
             hasStoredPassword = false;
             storedPassword = null;
             localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
         } else if (reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
             state.error = SocketError.AUTH_TIMEOUT;
         } else if (reason === SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT) {
-            state.initialConnect = true;
+            state.authenticated = false;
             state.error = null;
         }
 
@@ -259,7 +259,7 @@ export const connect = (password: string, rememberPassword: boolean = false) => 
                     reconnectTry: 0,
                     reconnectInMs: 0,
                     connected: true,
-                    initialConnect: false,
+                    authenticated: true,
                     error: null,
                 });
             }
