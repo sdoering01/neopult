@@ -41,33 +41,35 @@
         {/if}
 
         <form on:submit|preventDefault={handleFormSubmit} class="flex flex-col gap-2">
-            <div class="flex items-center">
-                <input
-                    bind:this={passwordInputEl}
-                    placeholder="Password"
-                    type="password"
-                    disabled={formDisabled}
-                    class="flex-1 px-2 py-1 mr-1 rounded-md text-black"
-                />
-                <Button disabled={formDisabled}>
-                    <div class="flex items-center">
-                        {#if $socketConnectionStore.connecting}
-                            <span
-                                class="w-4 h-4 inline-block rounded-full border-2 border-y-black mr-2 animate-spin"
-                            />{/if}Login
-                    </div>
-                </Button>
-            </div>
+            <input
+                bind:this={passwordInputEl}
+                placeholder="Password"
+                type="password"
+                disabled={formDisabled}
+                class="flex-1 px-2 py-1 mr-1 rounded-md text-black w-full"
+            />
             <div class="flex items-center justify-between">
                 <label for="remember-password-checkbox">Remember password</label>
                 <input
                     id="remember-password-checkbox"
-                    class="w-4 h-4"
+                    class="w-4 h-4 accent-slate-400"
                     type="checkbox"
                     disabled={formDisabled}
                     bind:this={rememberPasswordCheckboxEl}
                 />
             </div>
+
+            <hr class="my-1 border-slate-500" />
+
+            <Button active disabled={formDisabled}>
+                {#if $socketConnectionStore.connecting}
+                    <div class="absolute left-2 inset-y-0 flex items-center justify-center">
+                        <span
+                            class="w-4 h-4 inline-block rounded-full border-2 border-y-black mr-2 animate-spin"
+                        />
+                    </div>
+                {/if}Login
+            </Button>
         </form>
     </div>
 </div>
