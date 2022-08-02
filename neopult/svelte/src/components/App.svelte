@@ -1,10 +1,5 @@
 <script lang="ts">
-    import {
-        socketConnectionStore,
-        neopultStore,
-        reconnect,
-        logout,
-    } from '$lib/neopult';
+    import { socketConnectionStore, neopultStore, reconnect, logout } from '$lib/neopult';
     import Module from '$components/Module.svelte';
     import Button from '$components/Button.svelte';
 </script>
@@ -24,7 +19,6 @@
                     >
                 {/if}
             </div>
-
         </div>
     {/if}
     <div class="p-2 flex flex-col items-start gap-2">

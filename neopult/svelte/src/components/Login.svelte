@@ -19,7 +19,9 @@
         <h1 class="text-4xl font-semibold text-center mb-6">Neopult</h1>
 
         {#if $socketConnectionStore.error !== null || (!$socketConnectionStore.connecting && $socketConnectionStore.tryingReconnect)}
-            <div class="flex flex-col gap-1 items-center bg-red-400 text-black text-center mb-2 p-2 rounded-md">
+            <div
+                class="flex flex-col gap-1 items-center bg-red-400 text-black text-center mb-2 p-2 rounded-md"
+            >
                 {#if $socketConnectionStore.error === SocketError.PASSWORD_INCORRECT}
                     Password incorrect
                 {:else if $socketConnectionStore.error === SocketError.STORED_PASSWORD_INCORRECT}
@@ -36,7 +38,6 @@
                     Unhandled connection error
                 {/if}
             </div>
-
         {/if}
 
         <form on:submit|preventDefault={handleFormSubmit} class="flex flex-col gap-2">
@@ -48,9 +49,7 @@
                     disabled={formDisabled}
                     class="flex-1 px-2 py-1 mr-1 rounded-md text-black"
                 />
-                <Button
-                    disabled={formDisabled}
-                >
+                <Button disabled={formDisabled}>
                     <div class="flex items-center">
                         {#if $socketConnectionStore.connecting}
                             <span
@@ -61,7 +60,13 @@
             </div>
             <div class="flex items-center justify-between">
                 <label for="remember-password-checkbox">Remember password</label>
-                <input id="remember-password-checkbox" class="w-4 h-4" type="checkbox" disabled={formDisabled} bind:this={rememberPasswordCheckboxEl} />
+                <input
+                    id="remember-password-checkbox"
+                    class="w-4 h-4"
+                    type="checkbox"
+                    disabled={formDisabled}
+                    bind:this={rememberPasswordCheckboxEl}
+                />
             </div>
         </form>
     </div>

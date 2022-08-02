@@ -113,7 +113,7 @@ const scheduleReconnect = (reconnectTry: number) => {
 const clearReconnectTimers = () => {
     clearTimeout(reconnectTimeout);
     clearInterval(reconnectUpdateInterval);
-}
+};
 
 export const logout = () => {
     clearReconnectTimers();

@@ -1,7 +1,7 @@
 <script lang="ts">
     export let active = false;
     export let disabled = false;
-    
+
     let extraClasses: string;
     $: {
         if (active) {

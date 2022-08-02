@@ -1,8 +1,5 @@
 <script lang="ts">
-    import {
-        socketConnectionStore,
-        reconnect,
-    } from '$lib/neopult';
+    import { socketConnectionStore, reconnect } from '$lib/neopult';
     import Login from '$components/Login.svelte';
     import App from '$components/App.svelte';
 </script>
