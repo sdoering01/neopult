@@ -20,7 +20,7 @@
 
         {#if $socketConnectionStore.error !== null || (!$socketConnectionStore.connecting && $socketConnectionStore.tryingReconnect)}
             <div
-                class="flex flex-col gap-1 items-center bg-red-400 text-black text-center mb-2 p-2 rounded-md"
+                class="flex flex-col gap-1 items-center bg-red-400 text-black text-center mb-4 p-2 rounded-md"
             >
                 {#if $socketConnectionStore.error === SocketError.PASSWORD_INCORRECT}
                     Password incorrect
