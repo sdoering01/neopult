@@ -67,9 +67,13 @@ const SOCKET_DISCONNECT_REASON_AUTH = 'auth';
 const SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT = 'auth_timeout';
 const SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT = 'client_logout';
 
+const LOCAL_STORAGE_PASSWORD_KEY = 'neopult_password_CHANNEL-HERE';
+
 let socket: WebSocket;
 let requestId = 0;
 let cachedPassword = '';
+let storedPassword = localStorage.getItem(LOCAL_STORAGE_PASSWORD_KEY);
+let hasStoredPassword = storedPassword !== null;
 
 let heartbeatTimeout: NodeJS.Timeout;
 let reconnectTimeout: NodeJS.Timeout;
@@ -114,6 +118,7 @@ const clearReconnectTimers = () => {
 export const logout = () => {
     clearReconnectTimers();
     socket.close();
+    localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
     handleDisconnect(SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT);
 };
 
@@ -130,9 +135,15 @@ const handleDisconnect = (reason: string) => {
         state.connected = false;
 
         if (reason === SOCKET_DISCONNECT_REASON_AUTH) {
-            // TODO: If has stored password: Remove stored password and set reason accordingly
-            state.error = SocketError.PASSWORD_INCORRECT;
+            if (hasStoredPassword) {
+                state.error = SocketError.STORED_PASSWORD_INCORRECT;
+            } else {
+                state.error = SocketError.PASSWORD_INCORRECT;
+            }
             state.initialConnect = true;
+            hasStoredPassword = false;
+            storedPassword = null;
+            localStorage.removeItem(LOCAL_STORAGE_PASSWORD_KEY);
         } else if (reason === SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT) {
             state.error = SocketError.AUTH_TIMEOUT;
         } else if (reason === SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT) {
@@ -160,7 +171,7 @@ const handleDisconnect = (reason: string) => {
     });
 };
 
-export const connect = (password: string) => {
+export const connect = (password: string, rememberPassword: boolean = false) => {
     console.log('Connecting');
     socket = new WebSocket('ws://localhost:4205/ws');
     cachedPassword = password;
@@ -194,16 +205,9 @@ export const connect = (password: string) => {
         } else if (msg == 'pong') {
             heartbeat();
         } else if (msg.system_info) {
-            socketConnectionStore.set({
-                connecting: false,
-                tryingReconnect: false,
-                reconnectTry: 0,
-                reconnectInMs: 0,
-                connected: true,
-                initialConnect: false,
-                error: null,
-            });
-            cachedPassword = password;
+            if (rememberPassword) {
+                localStorage.setItem(LOCAL_STORAGE_PASSWORD_KEY, password);
+            }
 
             const neopultState: NeopultState = { pluginInstances: {} };
             for (const pluginInstance of msg.system_info.plugin_instances) {
@@ -234,6 +238,16 @@ export const connect = (password: string) => {
                         ].actions[actionName].active = true;
                     }
                 }
+
+                socketConnectionStore.set({
+                    connecting: false,
+                    tryingReconnect: false,
+                    reconnectTry: 0,
+                    reconnectInMs: 0,
+                    connected: true,
+                    initialConnect: false,
+                    error: null,
+                });
             }
             neopultStore.set(neopultState);
         } else if (msg.notification) {
@@ -298,3 +312,7 @@ export const callAction = (pluginInstance: string, module: string, action: strin
     const json = JSON.stringify(request);
     socket.send(json);
 };
+
+if (hasStoredPassword) {
+    connect(storedPassword!);
+}
