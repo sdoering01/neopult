@@ -26,6 +26,7 @@ local listen_base_url = "your-domain.com"
 local websockify_port_1 = 6180 + channel -- 6180 = 6080 + 100 (100 channels with one websockify instance each)
 require("vnc").setup({
     listen = 2 * channel,
+    listen_displayed = 1,
     listen_base_url = listen_base_url,
     camera_mode_store = camera_mode_store,
     -- Adds support for the yesvnc web connector.
@@ -42,6 +43,7 @@ require("vnc").setup({
 })
 require("vnc").setup({
     listen = 2 * channel + 1,
+    listen_displayed = 2,
     listen_base_url = listen_base_url,
     camera_mode_store = camera_mode_store,
 })

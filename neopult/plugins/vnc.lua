@@ -110,6 +110,7 @@ local function setup(args)
     args = args or {}
 
     local listen = args.listen
+    local listen_displayed = args.listen_displayed or args.listen
     local listen_base_url = args.listen_base_url
     local camera_mode_store = args.camera_mode_store
     local yesvnc = args.yesvnc
@@ -141,7 +142,7 @@ local function setup(args)
     if P.plugin_handle then
         P.plugin_handle:debug("sucessfully created plugin handle")
 
-        P.module_handle = P.plugin_handle:register_module("vnc-" .. listen, { display_name = "VNC " .. listen })
+        P.module_handle = P.plugin_handle:register_module("vnc-" .. listen, { display_name = "VNC " .. listen_displayed })
 
         if P.module_handle then
             P.module_handle:set_status(STATUS_INACTIVE)
