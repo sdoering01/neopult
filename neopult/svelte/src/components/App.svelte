@@ -20,9 +20,16 @@
     </div>
 {/if}
 
-<Button on:click={logout}>Logout</Button>
 <div class="max-w-5xl mx-auto">
     <div class="p-2 flex flex-col items-start gap-2">
+        <div
+            class="relative flex flex-col items-center justify-center gap-2 p-4 rounded-lg bg-slate-900 text-white w-full max-w-full shadow-sm xs:flex-row"
+        >
+            <h3 class="text-2xl">Neopult</h3>
+            <div class="w-full xs:absolute xs:right-4 xs:w-auto">
+                <Button responsive on:click={logout}>Logout</Button>
+            </div>
+        </div>
         {#each Object.values($neopultStore.pluginInstances) as pluginInstance (pluginInstance.name)}
             {#each Object.values(pluginInstance.modules) as module (module.name)}
                 <Module pluginInstanceName={pluginInstance.name} {module} />
