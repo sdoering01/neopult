@@ -833,7 +833,7 @@ impl WindowManager {
     fn change_screen_resolution(
         &mut self,
         (target_width, target_height): (u16, u16),
-    ) -> xcb::Result<()> {
+    ) -> anyhow::Result<()> {
         let cookie = self.conn.send_request(&randr::GetScreenSizeRange {
             window: self.screen.root(),
         });
@@ -844,9 +844,7 @@ impl WindowManager {
             || target_height < screen_size_range.min_width()
             || target_height > screen_size_range.max_height()
         {
-            // TODO: Change with returning some Error. This will require the introduction of a new
-            // error type which can be used for xcb errors and this custom result.
-            panic!(
+            anyhow::bail!(
                 "Tried to set invalid resolution {}x{}. Minimum resolution is {}x{}. \
                 Maximum resolution is {}x{}",
                 target_width,
