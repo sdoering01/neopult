@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { socketConnectionStore, connect, reconnect, SocketError } from '$lib/neopult';
+    import { socketConnectionStore, connect, reconnect, SocketError, channel } from '$lib/neopult';
     import Button from '$components/Button.svelte';
 
     const handleFormSubmit = () => {
@@ -16,7 +16,8 @@
 
 <div class="fixed inset-0 flex items-center justify-center">
     <div class="bg-slate-900 p-4 rounded-xl text-white">
-        <h1 class="text-4xl font-semibold text-center mb-6">Neopult</h1>
+        <h1 class="text-4xl font-semibold text-center mb-2">Neopult</h1>
+        <h3 class="text-2xl text-center mb-6">Channel {channel}</h3>
 
         {#if $socketConnectionStore.error !== null || (!$socketConnectionStore.connecting && $socketConnectionStore.tryingReconnect)}
             <div

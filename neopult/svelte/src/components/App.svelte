@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { socketConnectionStore, neopultStore, reconnect, logout } from '$lib/neopult';
+    import { socketConnectionStore, neopultStore, reconnect, logout, channel } from '$lib/neopult';
     import Module from '$components/Module.svelte';
     import Button from '$components/Button.svelte';
 </script>
@@ -25,7 +25,7 @@
         <div
             class="relative flex flex-col items-center justify-center gap-2 p-4 rounded-lg bg-slate-900 text-white w-full max-w-full shadow-sm xs:flex-row"
         >
-            <h3 class="text-2xl">Neopult</h3>
+            <h3 class="text-2xl">Neopult Channel {channel}</h3>
             <div class="w-full xs:absolute xs:right-4 xs:w-auto">
                 <Button responsive on:click={logout}>Logout</Button>
             </div>

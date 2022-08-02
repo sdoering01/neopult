@@ -1,4 +1,6 @@
 import { writable } from 'svelte/store';
+import { parseChannel } from '$lib/params';
+import { VITE_SOCKET_URL_TEMPLATE } from '$env/static/private';
 
 export enum SocketError {
     STORED_PASSWORD_INCORRECT,
@@ -67,7 +69,16 @@ const SOCKET_DISCONNECT_REASON_AUTH = 'auth';
 const SOCKET_DISCONNECT_REASON_AUTH_TIMEOUT = 'auth_timeout';
 const SOCKET_DISCONNECT_REASON_CLIENT_LOGOUT = 'client_logout';
 
-const LOCAL_STORAGE_PASSWORD_KEY = 'neopult_password_CHANNEL-HERE';
+const params = new URLSearchParams(window.location.search);
+export const channel = parseChannel(params);
+
+const LOCAL_STORAGE_PASSWORD_KEY = `neopult_password_${channel}`;
+
+const port = 4200 + channel;
+const socketUrl = VITE_SOCKET_URL_TEMPLATE.replace('{{PORT}}', port.toString()).replace(
+    '{{CHANNEL}}',
+    channel.toString()
+);
 
 let socket: WebSocket;
 let requestId = 0;
@@ -78,6 +89,9 @@ let hasStoredPassword = storedPassword !== null;
 let heartbeatTimeout: NodeJS.Timeout;
 let reconnectTimeout: NodeJS.Timeout;
 let reconnectUpdateInterval: NodeJS.Timer;
+
+console.log("Using channel", channel);
+console.log("Using socket url", socketUrl);
 
 const heartbeat = () => {
     clearTimeout(heartbeatTimeout);
@@ -173,7 +187,7 @@ const handleDisconnect = (reason: string) => {
 
 export const connect = (password: string, rememberPassword: boolean = false) => {
     console.log('Connecting');
-    socket = new WebSocket('ws://localhost:4205/ws');
+    socket = new WebSocket(socketUrl);
     cachedPassword = password;
 
     socketConnectionStore.update((state) => {
