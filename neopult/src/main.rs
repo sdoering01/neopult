@@ -107,26 +107,43 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
-    let plugin_system = match PluginSystem::init(
-        runtime.handle().clone(),
-        env_config,
-        shutdown_channels.clone(),
-        plugin_event_tx.clone(),
-        plugin_event_rx,
-        plugin_notification_tx.clone(),
-        wm,
-    ) {
-        Ok(plugin_system) => plugin_system,
-        Err(e) => {
-            eprintln!("Error when initializing the plugin system: {:?}", e);
-            process::exit(1);
-        }
-    };
-
-    let config = Arc::new(plugin_system.get_config()?);
-
     runtime.block_on(async {
-        let mut plugin_system_handle = runtime.spawn_blocking(|| plugin_system.event_loop());
+        // This looks a bit ugly, but for the io driver of tokio to work we need to be inside of
+        // the runtime.block_on() call. But we can't perform the init directly inside of the
+        // block_on call since the plugin system starts a new runtime for plugin calls, which is
+        // not possible in the async context of a runtime. That's why this is done in a separate
+        // blocking task.
+        let (config_tx, config_rx) = oneshot::channel();
+        let mut plugin_system_handle = runtime.spawn_blocking({
+            let runtime_handle = runtime.handle().to_owned();
+            let shutdown_channels = shutdown_channels.clone();
+            let plugin_event_tx = plugin_event_tx.clone();
+            let plugin_notification_tx = plugin_notification_tx.clone();
+
+            move || {
+            let plugin_system = match PluginSystem::init(
+                runtime_handle,
+                env_config,
+                shutdown_channels.clone(),
+                plugin_event_tx.clone(),
+                plugin_event_rx,
+                plugin_notification_tx.clone(),
+                wm,
+            ) {
+                Ok(plugin_system) => plugin_system,
+                Err(e) => {
+                    eprintln!("Error when initializing the plugin system: {:?}", e);
+                    process::exit(1);
+                }
+            };
+
+            let config = Arc::new(plugin_system.get_config().expect("couldn't read config from lua"));
+            config_tx.send(config).unwrap();
+
+            plugin_system.event_loop()
+        }});
+
+        let config = config_rx.await?;
 
         let mut server_handle = tokio::spawn(server::start(
             config,
