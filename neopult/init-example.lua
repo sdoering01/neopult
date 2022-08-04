@@ -17,6 +17,8 @@ require("cvh_camera").setup({
     janus_room_pin = "testcvh",
     -- This has to match the admin key in the general block of janus.plugin.videoroom.jcfg and should REMAIN PRIVATE
     janus_admin_key = "secret",
+    -- Allows users to specify a name that is displayed in their camera feed
+    allow_custom_names = false,
     camera_mode_store = camera_mode_store,
 })
 

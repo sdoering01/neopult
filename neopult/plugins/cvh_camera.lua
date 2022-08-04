@@ -31,6 +31,11 @@ local function setup(args)
         dynamic_camera_mode = true,
     }
 
+    P.generate_annotation_html = function(name)
+        return [[<div style="box-sizing: border-box; position: absolute; bottom: 0; width: 100%; background: rgba(0, 0, 0, 0.5); color: white; text-align: center; padding: 4px;">]]
+            .. name .. [[</div>]]
+    end
+
     P.any_cameras_visible = function()
         for _, visible in ipairs(P.camera_visible_states) do
             if visible then
@@ -121,13 +126,30 @@ local function setup(args)
             P.update_camera_visible_state(slot + 1, false)
             P.plugin_handle:info("removed feed on slot " .. slot)
             P.camera_modules[slot + 1]:set_active_actions({})
+
+            if P.allow_custom_names then
+                local cmd = string.format("remove_annotation %d", slot)
+                P.camera_server_handle:writeln(cmd)
+            end
+
             -- Only set status to waiting when status was active previously. This
             -- prevents overwriting an inactive status.
             if P.camera_modules[slot + 1]:get_status() == STATUS_ACTIVE then
                 P.camera_modules[slot + 1]:set_status(STATUS_WAITING)
             end
         elseif type == "custom_name" then
-            P.plugin_handle:warn("camera server custom_name messages are not handled yet")
+            local params = string.sub(line, space + 1)
+            local param_space = string.find(params, ' ')
+            local slot_str = string.sub(params, 1, param_space - 1)
+            local slot = tonumber(slot_str)
+            if P.allow_custom_names then
+                local name = string.sub(params, param_space + 1)
+                local html = P.generate_annotation_html(name)
+                local cmd = string.format("set_annotation %d %s", slot, html)
+                P.camera_server_handle:writeln(cmd)
+            else
+                P.camera_modules[slot + 1]:debug("got custom name, but custom names are not allowed")
+            end
         end
     end
 
@@ -154,6 +176,7 @@ local function setup(args)
     local janus_admin_key = args.janus_admin_key or "secret"
     local ping_janus = args.ping_janus ~= false
     local generate_secure_tokens = args.generate_secure_tokens ~= false
+    P.allow_custom_names = args.allow_custom_names == true
 
     local camera_mode_store = args.camera_mode_store
     local dynamic_camera_mode = args.dynamic_camera_mode ~= false
@@ -260,6 +283,9 @@ local function setup(args)
                         "%s?slot=%d&room=%d&token=%s",
                         P.sender_base_url, camera - 1, janus_room, token
                     )
+                    if P.allow_custom_names then
+                        sender_link = sender_link .. "&customNameAllowed"
+                    end
                     local sender_message = P.generate_sender_message(sender_link)
                     module_handle:info(sender_message)
                     module_handle:set_message(sender_message)

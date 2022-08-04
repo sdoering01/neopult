@@ -11,6 +11,7 @@ require("cvh_camera").setup({
     sender_base_url = "http://localhost:3000/camera-sender.html",
     cameras = 2,
     janus_room_pin = "testcvh",
+    allow_custom_names = false,
     camera_mode_store = camera_mode_store,
 })
 
