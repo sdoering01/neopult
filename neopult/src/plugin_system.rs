@@ -6,12 +6,20 @@ use crate::{
 use ::log::{debug, error, info, warn};
 use anyhow::Context;
 use mlua::{FromLuaMulti, Function, Lua, RegistryKey, Table, ToLuaMulti, Value};
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
     fmt::{self, Display, Formatter},
+    fs::{self, ReadDir},
     io,
+    path::PathBuf,
     sync::{Arc, Mutex, RwLock, Weak},
+    thread,
+    time::{Duration, Instant},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -20,6 +28,8 @@ mod config;
 mod log;
 
 const SEPARATOR: &str = "::";
+const OLD_PROCESS_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(2500);
+const OLD_PROCESS_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 struct LuaContext {
@@ -33,6 +43,7 @@ struct LuaContext {
     shutdown_sender: broadcast::Sender<()>,
     plugin_shutdown_wait_sender: Weak<mpsc::Sender<()>>,
     run_later_tasks: Mutex<VecDeque<RegistryKey>>,
+    pid_dir_path: PathBuf,
 }
 
 trait LogWithPrefix {
@@ -166,11 +177,7 @@ struct Module {
 }
 
 impl Module {
-    fn new(
-        name: String,
-        plugin_instance_name: String,
-        display_name: Option<String>,
-    ) -> Self {
+    fn new(name: String, plugin_instance_name: String, display_name: Option<String>) -> Self {
         Self {
             name,
             display_name,
@@ -383,6 +390,68 @@ fn inject_plugin_api(lua: &Lua, neopult: &Table, ctx: Arc<LuaContext>) -> anyhow
     Ok(())
 }
 
+fn clean_old_processes(pid_items: ReadDir) {
+    // The performance isn't ideal, because processes are killed one after another, with each
+    // process having a grace period to shut down after a SIGINT. But ideally needing to clean old
+    // processes shouldn't happen at all.
+    for item in pid_items.flatten() {
+        let path = item.path();
+        let filename_os = item.file_name();
+        let filename = filename_os.to_string_lossy();
+        if filename.ends_with(".pid") {
+            match filename.trim_end_matches(".pid").parse::<i32>() {
+                Ok(pid) if pid > 0 => {
+                    debug!("found old process with pid {}", pid);
+                    let pid = Pid::from_raw(pid);
+                    if signal::kill(pid, None).is_err() {
+                        debug!("old process with pid {} is already dead", pid);
+                    } else {
+                        debug!("old process with pid {} is still alive", pid);
+                        kill_old_process(pid);
+                    }
+
+                    if let Err(e) = fs::remove_file(path) {
+                        warn!("error removing old process pid file: {}", e);
+                    }
+                }
+                Ok(pid) => {
+                    warn!("found old process with invalid pid {}, somebody might have messed with the pid directory", pid);
+                }
+                Err(e) => {
+                    error!("error parsing pid filename: {}", e);
+                }
+            }
+        }
+    }
+}
+
+fn kill_old_process(pid: Pid) {
+    if let Err(e) = signal::kill(pid, Signal::SIGINT) {
+        warn!(
+            "error sending SIGINT to old process with pid {}: {}",
+            pid, e
+        );
+        return;
+    }
+    let start_time = Instant::now();
+    while start_time.elapsed() < OLD_PROCESS_SHUTDOWN_GRACE_PERIOD {
+        if signal::kill(pid, None).is_err() {
+            return;
+        }
+        thread::sleep(OLD_PROCESS_SHUTDOWN_POLL_INTERVAL);
+    }
+    debug!(
+        "old process with pid {} is still alive after grace period -- killing with SIGKILL",
+        pid
+    );
+    if let Err(e) = signal::kill(pid, Signal::SIGKILL) {
+        warn!(
+            "error sending SIGKILL to old process with pid {}: {}",
+            pid, e
+        );
+    }
+}
+
 #[derive(Debug)]
 pub struct PluginSystem {
     lua: Lua,
@@ -427,6 +496,30 @@ impl PluginSystem {
             package_table.set("path", neopult_lua_path + &lua_path)?;
         }
 
+        let pid_dir_path = PathBuf::from(format!("/tmp/neopult-channel-{}", env_config.channel));
+
+        match fs::read_dir(&pid_dir_path) {
+            Ok(items) => {
+                clean_old_processes(items);
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if let Err(e) = fs::create_dir_all(&pid_dir_path) {
+                    error!(
+                        "couldn't create PID directory {}: {}",
+                        pid_dir_path.display(),
+                        e
+                    );
+                }
+            }
+            Err(e) => {
+                error!(
+                    "couldn't read PID directory {}: {}",
+                    pid_dir_path.display(),
+                    e
+                );
+            }
+        }
+
         let ctx = Arc::new(LuaContext {
             env_config: Arc::new(env_config),
             main_runtime_handle,
@@ -440,6 +533,7 @@ impl PluginSystem {
             // every context reference on shutdown.
             plugin_shutdown_wait_sender: Arc::downgrade(&plugin_shutdown_wait_sender),
             run_later_tasks: Mutex::new(VecDeque::new()),
+            pid_dir_path,
         });
 
         let neopult = lua.create_table()?;

@@ -19,8 +19,8 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, Command},
-    sync::{mpsc, Mutex},
+    process::{ChildStdin, Command},
+    sync::{mpsc, oneshot},
 };
 
 #[derive(Debug)]
@@ -195,11 +195,21 @@ impl PluginInstanceHandle {
             "stderr",
         ));
 
-        let child_mutex = Arc::new(Mutex::new(child));
+        let child_stdin = child.stdin.take().unwrap();
+
+        let pid_file_path = self.ctx.pid_dir_path.join(format!("{}.pid", pid));
+        if let Err(e) = std::fs::File::create(&pid_file_path) {
+            self.plugin_instance.error(format!(
+                "couldn't create PID file {}: {}",
+                pid_file_path.display(),
+                e
+            ));
+        }
+
+        let (kill_tx, kill_rx) = oneshot::channel();
 
         // Shutdown handler
         tokio::spawn({
-            let mut shutdown_receiver = self.ctx.shutdown_sender.subscribe();
             let plugin_shutdown_wait_sender = self
                 .ctx
                 .plugin_shutdown_wait_sender
@@ -207,12 +217,28 @@ impl PluginInstanceHandle {
                 .unwrap()
                 .as_ref()
                 .clone();
-            let child_mutex = child_mutex.clone();
+            let cmd = cmd.clone();
             async move {
-                let _ = shutdown_receiver.recv().await;
-                let mut child = child_mutex.lock().await;
-                // On ctrl-c SIGINT is sent to the child automatically so we only need to wait
-                let _ = child.wait().await;
+                tokio::select!(
+                    _ = kill_rx => {
+                        match child.kill().await {
+                            Ok(_) => {
+                                let _ = child.wait().await;
+                            }
+                            Err(e) => {
+                                error!("tried to kill process {} (PID {}) which is not running: {}", cmd, pid, e);
+                            }
+                        }
+                    },
+                    _ = child.wait() => {},
+                );
+                if let Err(e) = tokio::fs::remove_file(&pid_file_path).await {
+                    error!(
+                        "couldn't remove PID file {}: {}",
+                        pid_file_path.display(),
+                        e
+                    );
+                }
                 drop(plugin_shutdown_wait_sender);
             }
         });
@@ -221,7 +247,8 @@ impl PluginInstanceHandle {
             cmd,
             pid,
             ctx: self.ctx.clone(),
-            child: child_mutex,
+            child_stdin,
+            kill_sender: Some(kill_tx),
             plugin_instance: self.plugin_instance.clone(),
         };
 
@@ -614,7 +641,8 @@ impl UserData for ModuleHandle {
 }
 
 struct ProcessHandle {
-    child: Arc<Mutex<Child>>,
+    child_stdin: ChildStdin,
+    kill_sender: Option<oneshot::Sender<()>>,
     ctx: Arc<LuaContext>,
     cmd: String,
     pid: u32,
@@ -624,15 +652,8 @@ struct ProcessHandle {
 impl ProcessHandle {
     fn write(&mut self, _lua: &Lua, buf: String) -> mlua::Result<()> {
         self.ctx.plugin_runtime.block_on(async {
-            if let Some(stdin) = self.child.lock().await.stdin.as_mut() {
-                stdin.write_all(buf.as_bytes()).await
-            } else {
-                self.plugin_instance.warn(format!(
-                    "tried to write stdin of dead process {} (PID {})",
-                    self.cmd, self.pid
-                ));
-                Ok(())
-            }
+            // Fails when process is not running anymore
+            self.child_stdin.write_all(buf.as_bytes()).await
         })?;
         Ok(())
     }
@@ -644,18 +665,22 @@ impl ProcessHandle {
     fn kill(&mut self) -> mlua::Result<()> {
         self.plugin_instance
             .debug(format!("killing process {} (PID {})", self.cmd, self.pid));
-        self.ctx.plugin_runtime.block_on(async {
-            let mut child = self.child.lock().await;
-            match child.kill().await {
-                Ok(_) => {
-                    let _ = child.wait().await;
+        match self.kill_sender.take() {
+            Some(kill_tx) => {
+                if let Err(_) = kill_tx.send(()) {
+                    self.plugin_instance.warn(format!(
+                        "tried to kill process {} (PID {}) which is not running",
+                        self.cmd, self.pid
+                    ));
                 }
-                Err(e) => self.plugin_instance.warn(format!(
-                    "Tried to to kill process {} (PID {}) which is not running: {}",
-                    self.cmd, self.pid, e
-                )),
             }
-        });
+            None => {
+                self.plugin_instance.warn(format!(
+                    "tried to kill process {} (PID {}) which was already killed explicitly",
+                    self.cmd, self.pid
+                ));
+            }
+        }
         Ok(())
     }
 }
