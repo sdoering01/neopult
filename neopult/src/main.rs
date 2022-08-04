@@ -121,27 +121,28 @@ fn main() -> Result<()> {
             let plugin_notification_tx = plugin_notification_tx.clone();
 
             move || {
-            let plugin_system = match PluginSystem::init(
-                runtime_handle,
-                env_config,
-                shutdown_channels.clone(),
-                plugin_event_tx.clone(),
-                plugin_event_rx,
-                plugin_notification_tx.clone(),
-                wm,
-            ) {
-                Ok(plugin_system) => plugin_system,
-                Err(e) => {
-                    eprintln!("Error when initializing the plugin system: {:?}", e);
-                    process::exit(1);
-                }
-            };
+                let plugin_system = match PluginSystem::init(
+                    runtime_handle,
+                    env_config,
+                    shutdown_channels.clone(),
+                    plugin_event_tx.clone(),
+                    plugin_event_rx,
+                    plugin_notification_tx.clone(),
+                    wm,
+                ) {
+                    Ok(plugin_system) => plugin_system,
+                    Err(e) => {
+                        eprintln!("Error when initializing the plugin system: {:?}", e);
+                        process::exit(1);
+                    }
+                };
 
-            let config = Arc::new(plugin_system.get_config().expect("couldn't read config from lua"));
-            config_tx.send(config).unwrap();
+                let config = Arc::new(plugin_system.get_config().expect("couldn't read config from lua"));
+                config_tx.send(config).unwrap();
 
-            plugin_system.event_loop()
-        }});
+                plugin_system.event_loop()
+            }
+        });
 
         let config = config_rx.await?;
 
