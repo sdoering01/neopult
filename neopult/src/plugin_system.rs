@@ -119,6 +119,7 @@ pub enum Event {
     ClientCommand(ClientCommand),
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Notification {

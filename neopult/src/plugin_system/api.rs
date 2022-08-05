@@ -524,7 +524,7 @@ impl ModuleHandle {
 
             let key = lua.create_registry_value(callback)?;
             let action = Action {
-                name: name.clone(),
+                name,
                 display_name,
                 key,
             };
@@ -667,7 +667,7 @@ impl ProcessHandle {
             .debug(format!("killing process {} (PID {})", self.cmd, self.pid));
         match self.kill_sender.take() {
             Some(kill_tx) => {
-                if let Err(_) = kill_tx.send(()) {
+                if kill_tx.send(()).is_err() {
                     self.plugin_instance.warn(format!(
                         "tried to kill process {} (PID {}) which is not running",
                         self.cmd, self.pid
