@@ -116,9 +116,10 @@ function ModuleHandle:get_status() end
 -- Sets the message of the module.
 --
 -- NOTE: This message will be rendered as HTML in the default web interface. DO
--- NOT INCLUDE UNTRUSTED USER INPUT or if you really need to, escape it
--- correctly. If you allow untrusted user input to be set as messages, the
--- client is made vulnerable to Cross Site Scripting (XSS) attacks.
+-- NOT INCLUDE UNTRUSTED USER INPUT or if you really need to, escape it using
+-- neopult.api.escape_html. If you allow untrusted user input to be set as
+-- messages, the client is made vulnerable to Cross Site Scripting (XSS)
+-- attacks.
 --- @param status string|nil the new status; nil to clear the status
 function ModuleHandle:set_message(status) end
 
@@ -262,6 +263,13 @@ neopult.api.create_store = function(initial_value) end
 -- you need to call window manager specific functions inside window callbacks.
 --- @param task function
 neopult.api.run_later = function(task) end
+
+-- Escapes the given html string so it can be safely inserted into the browser
+-- DOM. Untrusted user input should always be escaped to avoid cross-site
+-- scripting (XSS) attacks.
+--- @param html string unescaped html
+--- @return string #escaped html
+neopult.api.escape_html = function(html) end
 
 
 -- Log functions

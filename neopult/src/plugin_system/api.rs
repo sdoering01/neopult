@@ -965,6 +965,16 @@ fn run_later(lua: &Lua, func: Function, ctx: Arc<LuaContext>) -> mlua::Result<()
     Ok(())
 }
 
+fn escape_html(unescaped: String) -> mlua::Result<String> {
+    let escaped = unescaped
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("\'", "&#039;");
+    Ok(escaped)
+}
+
 pub(super) fn inject_api_functions(
     lua: &Lua,
     neopult: &Table,
@@ -994,6 +1004,10 @@ pub(super) fn inject_api_functions(
         create_context_function(lua, ctx.clone(), reposition_windows)?,
     )?;
     api.set("run_later", create_context_function(lua, ctx, run_later)?)?;
+    api.set(
+        "escape_html",
+        lua.create_function(|_lua, unescaped| escape_html(unescaped))?,
+    )?;
 
     neopult.set("api", api)?;
 
