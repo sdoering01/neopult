@@ -1,6 +1,7 @@
 use anyhow::Result;
 use env_logger::Env;
-use std::{process, sync::Arc};
+use log::debug;
+use std::{process, sync::Arc, time::Instant};
 use tokio::{
     io::{self, AsyncBufReadExt, BufReader},
     signal,
@@ -80,6 +81,7 @@ async fn terminal_client(
 }
 
 fn main() -> Result<()> {
+    let startup_time = Instant::now();
     env_logger::Builder::from_env(Env::default().default_filter_or("warn")).init();
 
     let env_config = config::get_env_config()?;
@@ -139,6 +141,9 @@ fn main() -> Result<()> {
 
                 let config = Arc::new(plugin_system.get_config().expect("couldn't read config from lua"));
                 config_tx.send(config).unwrap();
+
+                let time_until_event_loop = startup_time.elapsed();
+                debug!("Time until event loop start: {}ms", time_until_event_loop.as_millis());
 
                 plugin_system.event_loop()
             }
