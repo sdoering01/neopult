@@ -315,7 +315,10 @@ impl PluginInstanceHandle {
             class, min_geometry
         ));
 
-        let mut window_manager = self.ctx.window_manager.write().unwrap();
+        let mut window_manager = match self.ctx.write_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(Value::Nil),
+        };
 
         let timeout_end = Instant::now() + Duration::from_millis(timeout_ms);
         while Instant::now() < timeout_end {
@@ -431,7 +434,10 @@ impl PluginInstanceHandle {
             unmap_key,
         };
 
-        let mut wm = self.ctx.window_manager.write().unwrap();
+        let mut wm = match self.ctx.write_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(Value::Nil),
+        };
         match wm.manage_virtual_window(
             lua,
             name.clone(),
@@ -743,7 +749,10 @@ impl WindowHandle {
             }
         }
 
-        let mut wm = self.ctx.window_manager.write().unwrap();
+        let mut wm = match self.ctx.write_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(()),
+        };
         if let Err(e) = wm.max_window(lua, self.id, (width, height), margin) {
             self.plugin_instance
                 .error(format!("error setting window mode to max: {}", e));
@@ -757,7 +766,10 @@ impl WindowHandle {
             "setting mode of window with managed wid {} to min",
             self.id
         ));
-        let mut wm = self.ctx.window_manager.write().unwrap();
+        let mut wm = match self.ctx.write_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(()),
+        };
         if let Err(e) = wm.min_window(lua, self.id) {
             self.plugin_instance
                 .error(format!("error setting window mode to min: {}", e));
@@ -768,7 +780,10 @@ impl WindowHandle {
     fn hide(&self, lua: &Lua) -> mlua::Result<()> {
         self.plugin_instance
             .debug(format!("hiding window with managed wid {}", self.id));
-        let mut wm = self.ctx.window_manager.write().unwrap();
+        let mut wm = match self.ctx.write_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(()),
+        };
         if let Err(e) = wm.hide_window(lua, self.id) {
             self.plugin_instance
                 .error(format!("error hiding window: {}", e));
@@ -779,7 +794,10 @@ impl WindowHandle {
     fn unclaim(&self, lua: &Lua) -> mlua::Result<()> {
         self.plugin_instance
             .debug(format!("unclaiming window with managed wid {}", self.id));
-        let mut wm = self.ctx.window_manager.write().unwrap();
+        let mut wm = match self.ctx.write_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(()),
+        };
         if let Err(e) = wm.release_window(lua, self.id) {
             self.plugin_instance
                 .error(format!("error unclaiming window: {}", e));
@@ -788,7 +806,10 @@ impl WindowHandle {
     }
 
     fn is_primary_window(&self) -> mlua::Result<bool> {
-        let wm = self.ctx.window_manager.read().unwrap();
+        let wm = match self.ctx.read_window_manager() {
+            Some(wm) => wm,
+            None => return Ok(false),
+        };
         Ok(wm.is_primary_window(self.id))
     }
 }
@@ -928,7 +949,10 @@ fn create_store<'lua>(lua: &'lua Lua, value: Value<'lua>) -> mlua::Result<AnyUse
 }
 
 fn reposition_windows(lua: &Lua, _: Value, ctx: Arc<LuaContext>) -> mlua::Result<()> {
-    let mut wm = ctx.window_manager.write().unwrap();
+    let mut wm = match ctx.write_window_manager() {
+        Some(wm) => wm,
+        None => return Ok(()),
+    };
     if let Err(e) = wm.reposition_windows(lua) {
         error!("error when repositioning windows: {}", e);
     }

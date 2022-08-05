@@ -15,9 +15,9 @@ use std::{
     collections::{HashSet, VecDeque},
     fmt::{self, Display, Formatter},
     fs::{self, ReadDir},
-    io,
+    io, panic,
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock, Weak},
+    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak},
     thread,
     time::{Duration, Instant},
 };
@@ -44,6 +44,30 @@ struct LuaContext {
     plugin_shutdown_wait_sender: Weak<mpsc::Sender<()>>,
     run_later_tasks: Mutex<VecDeque<RegistryKey>>,
     pid_dir_path: PathBuf,
+}
+
+impl LuaContext {
+    fn read_window_manager(&self) -> Option<RwLockReadGuard<WindowManager>> {
+        let wm = &self.window_manager;
+        match panic::catch_unwind(|| wm.read()) {
+            Ok(lock_result) => Some(lock_result.unwrap()),
+            Err(_) => {
+                error!("tried to obtain a read lock on the window manager which would result in a deadlock; this could be caused by calling into the window manager inside a window manager callback, use `neopult.api.run_later` instead");
+                None
+            }
+        }
+    }
+
+    fn write_window_manager(&self) -> Option<RwLockWriteGuard<WindowManager>> {
+        let wm = &self.window_manager;
+        match panic::catch_unwind(move || wm.write()) {
+            Ok(lock_result) => Some(lock_result.unwrap()),
+            Err(_) => {
+                error!("tried to obtain a write lock on the window manager which would result in a deadlock; this could be caused by calling into the window manager inside a window manager callback, use `neopult.api.run_later` instead");
+                None
+            }
+        }
+    }
 }
 
 trait LogWithPrefix {
