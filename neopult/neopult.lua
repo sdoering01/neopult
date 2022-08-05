@@ -243,6 +243,21 @@ neopult.api = {}
 --- @return PluginInstanceHandle|nil #plugin instance handle or nil if an error occurred
 neopult.api.register_plugin_instance = function(name, opts) end
 
+-- Generates a random token consisting of `num_chars` alphanumeric characters
+-- ([a-zA-Z0-9]). This token is generated in a way that makes it safe to use in
+-- secure contexts, such as passwords.
+--- @param num_chars integer number of random chars (range: 0-255)
+--- @return string #random alphanumeric token
+neopult.api.generate_token = function(num_chars) end
+
+-- Returns the channel number of the current neopult instance.
+--- @return integer
+neopult.api.get_channel = function() end
+
+-- Returns the path to the channel home of the current neopult instance.
+--- @return string
+neopult.api.get_channel_home = function() end
+
 -- Creates a store for communication between plugins. A store holds one value
 -- of any type at a time. A store handle can be used to register subscriptions
 -- in form of a callback. All callbacks will be called with the new value every
@@ -256,6 +271,12 @@ neopult.api.register_plugin_instance = function(name, opts) end
 --- @param initial_value? any initial value of the store
 --- @return Store
 neopult.api.create_store = function(initial_value) end
+
+-- Lets the window manager reposition all its windows. This can be useful to
+-- trigger invocations of virtual window callbacks. If the behavior of all
+-- window callbacks is independent of state, this function effectively is a
+-- noop.
+neopult.api.reposition_windows = function() end
 
 -- Runs the function at a later point in time. Currently this is in the event
 -- loop of the plugin system, before processing new events. This makes sure,
