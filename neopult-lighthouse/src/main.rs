@@ -80,7 +80,7 @@ struct Args {
     websockify_base_path: Option<String>,
 
     /// Port on which websockify can be reached by the noVNC client. If given, this port will be
-    /// used for all channels. This can be useful when running websockify behind a reverse proxxy.
+    /// used for all channels. This can be useful when running websockify behind a reverse proxy.
     /// Defaults to 6080 + channel_number.
     #[clap(short = 's', long, value_name = "PORT")]
     websockify_port: Option<u16>,
