@@ -66,7 +66,7 @@
                 {#if $socketConnectionStore.connecting}
                     <div class="absolute left-2 inset-y-0 flex items-center justify-center">
                         <span
-                            class="w-4 h-4 inline-block rounded-full border-2 border-y-black mr-2 animate-spin"
+                            class="w-4 h-4 inline-block rounded-full border-2 border-y-black border-x-transparent mr-2 animate-spin"
                         />
                     </div>
                 {/if}Login

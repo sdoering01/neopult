@@ -25,7 +25,7 @@
     on:click
     {disabled}
     class:cursor-not-allowed={disabled}
-    class="outline-none px-2 py-1 rounded-md text-black transition {extraClasses}"
+    class="relative outline-none px-2 py-1 rounded-md text-black transition {extraClasses}"
 >
     <slot />
 </button>
