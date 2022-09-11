@@ -10,6 +10,13 @@ const config = {
         alias: {
             $components: 'src/components',
         },
+        paths: {
+            // SETUP: Change this to the path where your site will be hosted,
+            // if it differs from the root. For example, if you plan to host
+            // your site at https://example.com/blog/, change this to '/blog'
+            // (note the leading but not trailing slash).
+            base: '',
+        },
         prerender: {
             default: true,
         },
