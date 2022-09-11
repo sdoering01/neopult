@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { parseChannel } from '$lib/params';
-import { VITE_SOCKET_URL_TEMPLATE } from '$env/static/private';
+import { PUBLIC_SOCKET_URL_TEMPLATE } from '$env/static/public';
 
 export enum SocketError {
     STORED_PASSWORD_INCORRECT,
@@ -75,7 +75,7 @@ export const channel = parseChannel(params);
 const LOCAL_STORAGE_PASSWORD_KEY = `neopult_password_${channel}`;
 
 const port = 4200 + channel;
-const socketUrl = VITE_SOCKET_URL_TEMPLATE.replace('{{PORT}}', port.toString()).replace(
+const socketUrl = PUBLIC_SOCKET_URL_TEMPLATE.replace('{{PORT}}', port.toString()).replace(
     '{{CHANNEL}}',
     channel.toString()
 );
