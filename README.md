@@ -1,5 +1,8 @@
 # Neopult
 
+> This documentation is not yet finished. Quotes starting with "TODO" indicate
+> work that is yet to be done.
+
 Neopult is an extensible and customizable synchronous teaching platform. It is
 primarily suited for online university lectures with one presenter.
 
@@ -350,10 +353,14 @@ repository. The recommended installation path is `/usr/local/share/yesvnc`
 
 
 > TODO: Installation, Directory Locations
+
 > TODO: Set Janus admin_key in Janus config and init.lua
+
 > TODO: Neopult Lighthouse Config and flags in systemd service
 >   - To do this: New systemd service for neopult lighthouse
+
 > TODO: yesVNC
+
 > TODO: Open the ports in the firewall for VNC
->
+
 > TODO: Update neopult.lua
