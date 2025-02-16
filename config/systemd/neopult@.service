@@ -1,5 +1,5 @@
 [Unit]
-Description=NeoPULT channel %i
+Description=Neopult channel %i
 Requires=neopult-vncserver@%i.service neopult-novnc@%i.service
 After=network.target neopult-vncserver@%i.service
 
