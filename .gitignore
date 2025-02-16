@@ -1,5 +1,6 @@
 /target
 /neopult_home
+.DS_Store
 
 # latex noise
 /assets/**/*.aux
